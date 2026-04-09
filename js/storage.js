@@ -41,11 +41,19 @@ const Storage = {
     try {
       this._isSyncing = true; // 上書き時に自分の保存処理が走らないようにする
 
-      const [{ data: sRes }, { data: pRes }, { data: rRes }] = await Promise.all([
+      const [sQuery, pQuery, rQuery] = await Promise.all([
         supabase.from('settings').select('*').eq('id', 'global').maybeSingle(),
         supabase.from('players').select('*'),
         supabase.from('rounds').select('*').order('round_number')
       ]);
+
+      if (sQuery.error || pQuery.error || rQuery.error) {
+        throw new Error('Database fetch error');
+      }
+
+      const sRes = sQuery.data;
+      const pRes = pQuery.data;
+      const rRes = rQuery.data;
 
       const data = this.getDefaultData();
 
