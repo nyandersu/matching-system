@@ -14,11 +14,25 @@ const UI = {
     this.bindPlayerFormEvents();
     this.bindMatchingEvents();
     this.bindSettingsEvents();
+    
+    // 初回のローカル描画
+    this.renderAll();
+
+    // Supabaseからのリアルタイム同期が来た時のハンドラ
+    Storage.initRealtime(() => {
+      this.renderAll();
+    });
+
+    this.showTab('players');
+  },
+
+  renderAll() {
+    // 現在のタブに応じて必要な描画を行うか、もしくは全再描画する
     this.renderPlayers();
     this.loadSettings();
+    this.renderMatchingResult();
     this.renderRounds();
     this.renderStandings();
-    this.showTab('players');
   },
 
   // ============================================

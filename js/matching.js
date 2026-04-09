@@ -157,9 +157,11 @@ const Matching = {
         if (used.has(players[j].id)) continue;
 
         const key = this.makeMatchKey(players[i].id, players[j].id);
-        if (matchHistory.has(key)) continue; // 絶対制約: 再戦禁止
+        const isRematch = matchHistory.has(key);
+        // 再戦禁止を絶対条件ではなく極めて重いペナルティとし、生成が100%失敗するのを防ぐ
+        const rematchPenalty = isRematch ? 10000 : 0; 
 
-        const score = this.pairScore(players[i], players[j], rankHistory);
+        const score = this.pairScore(players[i], players[j], rankHistory) + rematchPenalty;
         if (score < bestScore) {
           bestScore = score;
           bestPartner = j;

@@ -1,11 +1,123 @@
 /**
- * storage.js — LocalStorage管理モジュール
- * プレイヤーデータ、対戦カード、勝敗結果の永続化
+ * storage.js — LocalStorage & Supabase 同期モジュール
+ * オフライン時はLocalStorage、オンライン時はSupabaseと同期する
  */
 
 const STORAGE_KEY = 'shogi_matching_system';
+const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
+const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const Storage = {
+  _isSyncing: false,
+
+  /**
+   * リアルタイム同期の初期化
+   */
+  initRealtime(onUpdateCallback) {
+    if (!supabase) return;
+
+    // 初回にSupabaseから最新データを取得してローカルを更新
+    this.fetchFromSupabase().then(() => {
+      if (onUpdateCallback) onUpdateCallback();
+    });
+
+    // データベースの変更を購読（誰かが更新したらローカルを上書きして再描画）
+    supabase
+      .channel('public:any')
+      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
+        this.fetchFromSupabase().then(() => {
+          if (onUpdateCallback) onUpdateCallback();
+        });
+      })
+      .subscribe();
+  },
+
+  /**
+   * Supabaseから全データを取得してLocalStorageを上書きする
+   */
+  async fetchFromSupabase() {
+    if (!supabase) return;
+    try {
+      this._isSyncing = true; // 上書き時に自分の保存処理が走らないようにする
+
+      const [{ data: sRes }, { data: pRes }, { data: rRes }] = await Promise.all([
+        supabase.from('settings').select('*').eq('id', 'global').maybeSingle(),
+        supabase.from('players').select('*'),
+        supabase.from('rounds').select('*').order('round_number')
+      ]);
+
+      const data = this.getDefaultData();
+
+      if (sRes) {
+        data.settings.numRounds = sRes.num_rounds;
+        data.settings.byeCountsAsWin = sRes.bye_counts_as_win;
+      }
+      
+      if (pRes) {
+        data.players = pRes.map(p => ({
+          id: p.id,
+          name: p.name,
+          grade: p.grade,
+          rank: p.rank
+        }));
+      }
+
+      if (rRes) {
+        data.rounds = rRes.map(r => ({
+          roundNumber: r.round_number,
+          matches: r.matches,
+          byePlayerId: r.bye_player_id
+        }));
+      }
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      this._isSyncing = false;
+    } catch (e) {
+      console.warn('Supabaseからのデータ取得に失敗しました(オフラインの可能性があります):', e);
+      this._isSyncing = false;
+    }
+  },
+
+  /**
+   * Supabaseへ全データを同期送信する (バックグラウンド処理)
+   */
+  async syncToSupabase(data) {
+    if (!supabase || this._isSyncing) return;
+    
+    try {
+      // 設定の同期
+      await supabase.from('settings').upsert({
+        id: 'global',
+        num_rounds: data.settings.numRounds,
+        bye_counts_as_win: data.settings.byeCountsAsWin
+      });
+
+      // 選手の同期
+      if (data.players.length > 0) {
+        await supabase.from('players').upsert(data.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          grade: p.grade,
+          rank: p.rank
+        })));
+      }
+
+      // ラウンド（対戦表）の同期。配列が空の場合はSupabaseの全ラウンドを削除
+      if (data.rounds.length === 0) {
+        await supabase.from('rounds').delete().neq('round_number', -1);
+      } else {
+        await supabase.from('rounds').upsert(data.rounds.map(r => ({
+          round_number: r.roundNumber,
+          matches: r.matches,
+          bye_player_id: r.byePlayerId
+        })));
+      }
+    } catch (err) {
+      console.warn('Supabaseへの同期に失敗:(オフライン)', err);
+    }
+  },
+
   /**
    * 全データを取得
    */
@@ -15,51 +127,38 @@ const Storage = {
       if (!raw) return this.getDefaultData();
       return JSON.parse(raw);
     } catch (e) {
-      console.error('データの読み込みに失敗しました:', e);
       return this.getDefaultData();
     }
   },
 
   /**
-   * 全データを保存
+   * 全データを保存してSupabaseに同期
    */
   saveAll(data) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      this.syncToSupabase(data);
     } catch (e) {
-      console.error('データの保存に失敗しました:', e);
+      console.error('ローカル保存失敗:', e);
     }
   },
 
-  /**
-   * デフォルトデータ
-   */
   getDefaultData() {
     return {
       players: [],
       rounds: [],
-      settings: {
-        numRounds: 5,
-        byeCountsAsWin: true
-      }
+      settings: { numRounds: 5, byeCountsAsWin: true }
     };
   },
 
-  /**
-   * プレイヤーを追加
-   */
   addPlayer(player) {
     const data = this.loadAll();
     player.id = this.generateId();
-    player.createdAt = Date.now();
     data.players.push(player);
     this.saveAll(data);
     return player;
   },
 
-  /**
-   * プレイヤーを更新
-   */
   updatePlayer(id, updates) {
     const data = this.loadAll();
     const idx = data.players.findIndex(p => p.id === id);
@@ -69,41 +168,29 @@ const Storage = {
     return data.players[idx];
   },
 
-  /**
-   * プレイヤーを削除
-   */
   deletePlayer(id) {
     const data = this.loadAll();
     data.players = data.players.filter(p => p.id !== id);
     this.saveAll(data);
+    if (supabase) {
+      supabase.from('players').delete().eq('id', id).then().catch(console.warn);
+    }
   },
 
-  /**
-   * プレイヤー一覧を取得
-   */
   getPlayers() {
     return this.loadAll().players;
   },
 
-  /**
-   * ラウンドデータを保存
-   */
   saveRounds(rounds) {
     const data = this.loadAll();
     data.rounds = rounds;
     this.saveAll(data);
   },
 
-  /**
-   * ラウンドデータを取得
-   */
   getRounds() {
     return this.loadAll().rounds;
   },
 
-  /**
-   * 対局結果を更新
-   */
   updateMatchResult(roundIndex, matchIndex, result) {
     const data = this.loadAll();
     if (data.rounds[roundIndex] && data.rounds[roundIndex].matches[matchIndex]) {
@@ -112,32 +199,24 @@ const Storage = {
     }
   },
 
-  /**
-   * 設定を更新
-   */
   updateSettings(settings) {
     const data = this.loadAll();
     data.settings = { ...data.settings, ...settings };
     this.saveAll(data);
   },
 
-  /**
-   * 設定を取得
-   */
   getSettings() {
     return this.loadAll().settings;
   },
 
-  /**
-   * 全データをリセット
-   */
   resetAll() {
     localStorage.removeItem(STORAGE_KEY);
+    if (supabase) {
+      supabase.from('players').delete().neq('id', 'dummy').then();
+      supabase.from('rounds').delete().neq('round_number', -1).then();
+    }
   },
 
-  /**
-   * UUID生成
-   */
   generateId() {
     return 'xxxx-xxxx-xxxx'.replace(/x/g, () =>
       Math.floor(Math.random() * 16).toString(16)
