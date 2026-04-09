@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>将棋部内戦マッチングシステム</title>
+  <meta name="description" content="将棋の団体戦メンバー選考のための部内戦マッチング・成績管理システム">
+  <link rel="stylesheet" href="index.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" defer></script>
+</head>
+<body>
+
+<div class="app-container">
+  <!-- Header -->
+  <header class="app-header">
+    <span class="app-logo">♛</span>
+    <h1 class="app-title">将棋部内戦マッチングシステム</h1>
+    <p class="app-subtitle">団体戦メンバー選考用 — 対戦組み合わせ自動生成 &amp; 成績管理</p>
+  </header>
+
+  <!-- Tab Navigation -->
+  <nav class="tab-nav" role="tablist">
+    <button class="tab-btn active" data-tab="players" role="tab" id="tab-btn-players">
+      <span class="tab-icon">👤</span>
+      <span class="tab-text">選手管理</span>
+    </button>
+    <button class="tab-btn" data-tab="matching" role="tab" id="tab-btn-matching">
+      <span class="tab-icon">⚔</span>
+      <span class="tab-text">マッチング</span>
+    </button>
+    <button class="tab-btn" data-tab="results" role="tab" id="tab-btn-results">
+      <span class="tab-icon">📝</span>
+      <span class="tab-text">結果入力</span>
+    </button>
+    <button class="tab-btn" data-tab="standings" role="tab" id="tab-btn-standings">
+      <span class="tab-icon">🏆</span>
+      <span class="tab-text">成績表</span>
+    </button>
+  </nav>
+
+  <!-- ======================== -->
+  <!-- Tab: 選手管理             -->
+  <!-- ======================== -->
+  <div class="tab-panel active" id="tab-players" role="tabpanel">
+    <div class="card">
+      <h2 class="card-title" id="form-title">
+        <span class="icon">✦</span> 選手を追加
+      </h2>
+      <form id="player-form" autocomplete="off">
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label" for="player-name">名前</label>
+            <input type="text" id="player-name" class="form-input" placeholder="例: 山田太郎" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="player-grade">学年</label>
+            <select id="player-grade" class="form-select" required>
+              <option value="1">1年</option>
+              <option value="2">2年</option>
+              <option value="3">3年</option>
+              <option value="4">4年</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="player-rank">ランク</label>
+            <select id="player-rank" class="form-select" required>
+              <option value="S">S ランク</option>
+              <option value="A">A ランク</option>
+              <option value="B">B ランク</option>
+              <option value="C">C ランク</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-group">
+          <button type="submit" class="btn btn-primary" id="submit-btn">追加</button>
+          <button type="button" class="btn btn-secondary hidden" id="cancel-edit-btn">キャンセル</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="section-header">
+      <h2 class="section-title">
+        <span>📋</span> 登録選手一覧
+        <span class="player-count-badge" id="player-count">0人</span>
+      </h2>
+      <button class="btn btn-danger" id="reset-all-btn" style="font-size:13px;">
+        全データリセット
+      </button>
+    </div>
+    <div id="player-list"></div>
+  </div>
+
+  <!-- ======================== -->
+  <!-- Tab: マッチング           -->
+  <!-- ======================== -->
+  <div class="tab-panel" id="tab-matching" role="tabpanel">
+    <div class="card">
+      <h2 class="card-title"><span class="icon">⚙</span> マッチング設定</h2>
+      <div class="matching-controls">
+        <div class="form-group">
+          <label class="form-label" for="num-rounds">ラウンド数</label>
+          <select id="num-rounds" class="form-select">
+            <option value="3">3回戦</option>
+            <option value="4">4回戦</option>
+            <option value="5" selected>5回戦</option>
+            <option value="6">6回戦</option>
+            <option value="7">7回戦</option>
+            <option value="8">8回戦</option>
+            <option value="9">9回戦</option>
+            <option value="10">10回戦</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" id="generate-btn">
+          ⚡ 対戦表を生成
+        </button>
+        <button class="btn btn-secondary" id="clear-rounds-btn">
+          クリア
+        </button>
+        <button class="btn btn-secondary" id="export-matches-btn">
+          📄 PDF出力
+        </button>
+      </div>
+    </div>
+    <div id="matching-result"></div>
+  </div>
+
+  <!-- ======================== -->
+  <!-- Tab: 結果入力             -->
+  <!-- ======================== -->
+  <div class="tab-panel" id="tab-results" role="tabpanel">
+    <div class="card" style="padding: 16px 20px;">
+      <p style="font-size:13px;color:var(--text-secondary);">
+        各対局の結果を入力してください。左側の <strong>○</strong> は先手（左）の勝ち、右側の <strong>○</strong> は後手（右）の勝ち、<strong>△</strong> は引き分けです。
+      </p>
+    </div>
+    <div id="results-container"></div>
+  </div>
+
+  <!-- ======================== -->
+  <!-- Tab: 成績表               -->
+  <!-- ======================== -->
+  <div class="tab-panel" id="tab-standings" role="tabpanel">
+    <div class="section-header">
+      <h2 class="section-title"><span>🏆</span> 成績順位表</h2>
+      <button class="btn btn-secondary" id="export-standings-btn">
+        📄 成績表PDF出力
+      </button>
+    </div>
+    <div class="card">
+      <div id="standings-container"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- Scripts -->
+<script src="js/storage.js"></script>
+<script src="js/matching.js"></script>
+<script src="js/pdf.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
