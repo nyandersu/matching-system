@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shogi-match-v1';
+const CACHE_NAME = 'shogi-match-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -32,19 +32,35 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Supabaseや他のAPIリクエストはキャッシュせずにネットワークを優先する（オフライン時はエラーになるがLocalStorageで対応）
+  // SupabaseやAPIへのリクエストはネットワークのみとする
   if (event.request.url.includes('supabase.co')) {
     return;
   }
 
+  // リソースの取得戦略：Network First (失敗したらキャッシュを返す)
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request);
-    }).catch(() => {
-      // ネットワークもキャッシュもない場合はindex.htmlを返す（SPAフォールバックのような挙動）
-      if (event.request.mode === 'navigate') {
-        return caches.match('./index.html');
-      }
-    })
+    fetch(event.request)
+      .then((networkResponse) => {
+        // ネットワークから取得成功したらキャッシュを更新しておく
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        // オフライン等で失敗した場合はキャッシュを返す
+        return caches.match(event.request).then((cached) => {
+          if (cached) {
+            return cached;
+          }
+          // キャッシュもなく、ナビゲーションリクエスト（URL直叩き）ならindex.htmlを返す
+          if (event.request.mode === 'navigate') {
+            return caches.match('./index.html');
+          }
+        });
+      })
   );
 });
