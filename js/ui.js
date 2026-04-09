@@ -19,7 +19,7 @@ const UI = {
     this.renderAll();
 
     // Supabaseからのリアルタイム同期が来た時のハンドラ
-    Storage.initRealtime(() => {
+    AppStorage.initRealtime(() => {
       this.renderAll();
     });
 
@@ -92,10 +92,10 @@ const UI = {
     }
 
     if (this.editingPlayerId) {
-      Storage.updatePlayer(this.editingPlayerId, { name, grade, rank });
+      AppStorage.updatePlayer(this.editingPlayerId, { name, grade, rank });
       this.showToast(`${name} を更新しました`, 'success');
     } else {
-      Storage.addPlayer({ name, grade, rank });
+      AppStorage.addPlayer({ name, grade, rank });
       this.showToast(`${name} を追加しました`, 'success');
     }
 
@@ -113,7 +113,7 @@ const UI = {
   },
 
   editPlayer(id) {
-    const players = Storage.getPlayers();
+    const players = AppStorage.getPlayers();
     const player = players.find(p => p.id === id);
     if (!player) return;
 
@@ -131,19 +131,19 @@ const UI = {
   },
 
   deletePlayer(id) {
-    const players = Storage.getPlayers();
+    const players = AppStorage.getPlayers();
     const player = players.find(p => p.id === id);
     if (!player) return;
 
     if (confirm(`${player.name} を削除しますか？`)) {
-      Storage.deletePlayer(id);
+      AppStorage.deletePlayer(id);
       this.showToast(`${player.name} を削除しました`, 'info');
       this.renderPlayers();
     }
   },
 
   renderPlayers() {
-    const players = Storage.getPlayers();
+    const players = AppStorage.getPlayers();
     const container = document.getElementById('player-list');
     const countEl = document.getElementById('player-count');
 
@@ -231,15 +231,15 @@ const UI = {
 
     document.getElementById('clear-rounds-btn').addEventListener('click', () => {
       if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。')) {
-        Storage.saveRounds([]);
+        AppStorage.saveRounds([]);
         this.renderMatchingResult();
         this.showToast('対戦表をクリアしました', 'info');
       }
     });
 
     document.getElementById('export-matches-btn').addEventListener('click', () => {
-      const rounds = Storage.getRounds();
-      const players = Storage.getPlayers();
+      const rounds = AppStorage.getRounds();
+      const players = AppStorage.getPlayers();
       if (rounds.length === 0) {
         this.showToast('エクスポートする対戦表がありません', 'error');
         return;
@@ -249,7 +249,7 @@ const UI = {
   },
 
   generateMatching() {
-    const players = Storage.getPlayers();
+    const players = AppStorage.getPlayers();
     const numRounds = parseInt(document.getElementById('num-rounds').value);
 
     if (players.length < 2) {
@@ -275,16 +275,16 @@ const UI = {
         return;
       }
 
-      Storage.saveRounds(result.rounds);
-      Storage.updateSettings({ numRounds });
+      AppStorage.saveRounds(result.rounds);
+      AppStorage.updateSettings({ numRounds });
       this.renderMatchingResult();
       this.showToast(`全${numRounds}回戦の対戦表を生成しました！`, 'success');
     }, 100);
   },
 
   renderMatchingResult() {
-    const rounds = Storage.getRounds();
-    const players = Storage.getPlayers();
+    const rounds = AppStorage.getRounds();
+    const players = AppStorage.getPlayers();
     const container = document.getElementById('matching-result');
     const playerMap = {};
     players.forEach(p => playerMap[p.id] = p);
@@ -345,8 +345,8 @@ const UI = {
   // ============================================
 
   renderRounds() {
-    const rounds = Storage.getRounds();
-    const players = Storage.getPlayers();
+    const rounds = AppStorage.getRounds();
+    const players = AppStorage.getPlayers();
     const container = document.getElementById('results-container');
     const playerMap = {};
     players.forEach(p => playerMap[p.id] = p);
@@ -412,7 +412,7 @@ const UI = {
   },
 
   setResult(roundIndex, matchIndex, result) {
-    Storage.updateMatchResult(roundIndex, matchIndex, result);
+    AppStorage.updateMatchResult(roundIndex, matchIndex, result);
     this.renderRounds();
   },
 
@@ -421,10 +421,10 @@ const UI = {
   // ============================================
 
   renderStandings() {
-    const players = Storage.getPlayers();
-    const rounds = Storage.getRounds();
+    const players = AppStorage.getPlayers();
+    const rounds = AppStorage.getRounds();
     const container = document.getElementById('standings-container');
-    const settings = Storage.getSettings();
+    const settings = AppStorage.getSettings();
 
     if (rounds.length === 0 || players.length === 0) {
       container.innerHTML = `
@@ -500,9 +500,9 @@ const UI = {
 
   bindSettingsEvents() {
     document.getElementById('export-standings-btn').addEventListener('click', () => {
-      const players = Storage.getPlayers();
-      const rounds = Storage.getRounds();
-      const settings = Storage.getSettings();
+      const players = AppStorage.getPlayers();
+      const rounds = AppStorage.getRounds();
+      const settings = AppStorage.getSettings();
       if (rounds.length === 0) {
         this.showToast('エクスポートするデータがありません', 'error');
         return;
@@ -513,7 +513,7 @@ const UI = {
 
     document.getElementById('reset-all-btn').addEventListener('click', () => {
       if (confirm('すべてのデータをリセットしますか？この操作は元に戻せません。')) {
-        Storage.resetAll();
+        AppStorage.resetAll();
         this.renderPlayers();
         this.renderMatchingResult();
         this.renderRounds();
@@ -524,7 +524,7 @@ const UI = {
   },
 
   loadSettings() {
-    const settings = Storage.getSettings();
+    const settings = AppStorage.getSettings();
     document.getElementById('num-rounds').value = settings.numRounds || 5;
   },
 

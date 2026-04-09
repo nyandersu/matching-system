@@ -8,7 +8,7 @@ const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
 const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-const Storage = {
+const AppStorage = {
   _isSyncing: false,
 
   /**
