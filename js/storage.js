@@ -6,7 +6,7 @@
 const STORAGE_KEY = 'shogi_matching_system';
 const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
-const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const AppStorage = {
   _isSyncing: false,
@@ -15,7 +15,7 @@ const AppStorage = {
    * リアルタイム同期の初期化
    */
   initRealtime(onUpdateCallback) {
-    if (!supabase) return;
+    if (!supabaseClient) return;
 
     // 初回にSupabaseから最新データを取得してローカルを更新
     this.fetchFromSupabase().then(() => {
@@ -23,7 +23,7 @@ const AppStorage = {
     });
 
     // データベースの変更を購読（誰かが更新したらローカルを上書きして再描画）
-    supabase
+    supabaseClient
       .channel('public:any')
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         this.fetchFromSupabase().then(() => {
@@ -37,14 +37,14 @@ const AppStorage = {
    * Supabaseから全データを取得してLocalStorageを上書きする
    */
   async fetchFromSupabase() {
-    if (!supabase) return;
+    if (!supabaseClient) return;
     try {
       this._isSyncing = true; // 上書き時に自分の保存処理が走らないようにする
 
       const [sQuery, pQuery, rQuery] = await Promise.all([
-        supabase.from('settings').select('*').eq('id', 'global').maybeSingle(),
-        supabase.from('players').select('*'),
-        supabase.from('rounds').select('*').order('round_number')
+        supabaseClient.from('settings').select('*').eq('id', 'global').maybeSingle(),
+        supabaseClient.from('players').select('*'),
+        supabaseClient.from('rounds').select('*').order('round_number')
       ]);
 
       if (sQuery.error || pQuery.error || rQuery.error) {
@@ -61,7 +61,7 @@ const AppStorage = {
         data.settings.numRounds = sRes.num_rounds;
         data.settings.byeCountsAsWin = sRes.bye_counts_as_win;
       }
-      
+
       if (pRes) {
         data.players = pRes.map(p => ({
           id: p.id,
@@ -91,11 +91,11 @@ const AppStorage = {
    * Supabaseへ全データを同期送信する (バックグラウンド処理)
    */
   async syncToSupabase(data) {
-    if (!supabase || this._isSyncing) return;
-    
+    if (!supabaseClient || this._isSyncing) return;
+
     try {
       // 設定の同期
-      await supabase.from('settings').upsert({
+      await supabaseClient.from('settings').upsert({
         id: 'global',
         num_rounds: data.settings.numRounds,
         bye_counts_as_win: data.settings.byeCountsAsWin
@@ -103,7 +103,7 @@ const AppStorage = {
 
       // 選手の同期
       if (data.players.length > 0) {
-        await supabase.from('players').upsert(data.players.map(p => ({
+        await supabaseClient.from('players').upsert(data.players.map(p => ({
           id: p.id,
           name: p.name,
           grade: p.grade,
@@ -113,9 +113,9 @@ const AppStorage = {
 
       // ラウンド（対戦表）の同期。配列が空の場合はSupabaseの全ラウンドを削除
       if (data.rounds.length === 0) {
-        await supabase.from('rounds').delete().neq('round_number', -1);
+        await supabaseClient.from('rounds').delete().neq('round_number', -1);
       } else {
-        await supabase.from('rounds').upsert(data.rounds.map(r => ({
+        await supabaseClient.from('rounds').upsert(data.rounds.map(r => ({
           round_number: r.roundNumber,
           matches: r.matches,
           bye_player_id: r.byePlayerId
@@ -180,8 +180,8 @@ const AppStorage = {
     const data = this.loadAll();
     data.players = data.players.filter(p => p.id !== id);
     this.saveAll(data);
-    if (supabase) {
-      supabase.from('players').delete().eq('id', id).then().catch(console.warn);
+    if (supabaseClient) {
+      supabaseClient.from('players').delete().eq('id', id).then().catch(console.warn);
     }
   },
 
@@ -219,9 +219,9 @@ const AppStorage = {
 
   resetAll() {
     localStorage.removeItem(STORAGE_KEY);
-    if (supabase) {
-      supabase.from('players').delete().neq('id', 'dummy').then();
-      supabase.from('rounds').delete().neq('round_number', -1).then();
+    if (supabaseClient) {
+      supabaseClient.from('players').delete().neq('id', 'dummy').then();
+      supabaseClient.from('rounds').delete().neq('round_number', -1).then();
     }
   },
 
