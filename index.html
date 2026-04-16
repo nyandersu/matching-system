@@ -124,6 +124,26 @@
             <option value="10">10回戦</option>
           </select>
         </div>
+        <div class="form-group weight-group">
+          <label class="form-label">同学年対決の回避</label>
+          <div class="weight-control">
+            <input type="range" id="grade-avoid-weight" class="weight-slider" min="0" max="4" step="1" value="2">
+            <div class="weight-steps">
+              <span>無効</span><span>低</span><span>標準</span><span>高</span><span>最高</span>
+            </div>
+          </div>
+          <span class="weight-badge" id="grade-avoid-label">標準</span>
+        </div>
+        <div class="form-group weight-group">
+          <label class="form-label">ランク帯の均等化</label>
+          <div class="weight-control">
+            <input type="range" id="rank-balance-weight" class="weight-slider" min="0" max="4" step="1" value="2">
+            <div class="weight-steps">
+              <span>無効</span><span>低</span><span>標準</span><span>高</span><span>最高</span>
+            </div>
+          </div>
+          <span class="weight-badge" id="rank-balance-label">標準</span>
+        </div>
         <button class="btn btn-primary" id="generate-btn">
           ⚡ 対戦表を生成
         </button>

@@ -6,13 +6,21 @@
 const Matching = {
   RANKS: ['S', 'A', 'B', 'C'],
 
+  // 段階別ペナルティ値（0=無効, 1=低, 2=標準, 3=高, 4=最高）
+  GRADE_PENALTIES: [0, 30, 100, 300, 1000],
+  RANK_WEIGHTS:    [0,  5,  15,  40,  100],
+
   /**
    * 全ラウンドの対戦組み合わせを生成
    * @param {Array} players - プレイヤー配列
    * @param {number} numRounds - ラウンド数
    * @returns {Array|null} ラウンド配列 or null（生成不可）
    */
-  generateAllRounds(players, numRounds) {
+  generateAllRounds(players, numRounds, options = {}) {
+    const gradeLevel     = options.gradeAvoidLevel  ?? 2;
+    const rankLevel      = options.rankBalanceLevel ?? 2;
+    const gradePenalty   = this.GRADE_PENALTIES[gradeLevel] ?? 100;
+    const rankWeight     = this.RANK_WEIGHTS[rankLevel]     ?? 15;
     // 実現可能性チェック
     if (players.length < 2) {
       return { error: 'プレイヤーが2人以上必要です。' };
@@ -49,7 +57,7 @@ const Matching = {
 
       for (let round = 0; round < numRounds; round++) {
         const result = this.generateSingleRound(
-          players, matchHistory, rankHistory, byeCounts, round
+          players, matchHistory, rankHistory, byeCounts, round, gradePenalty, rankWeight
         );
 
         if (!result) {
@@ -88,7 +96,7 @@ const Matching = {
   /**
    * 単一ラウンドの対戦組み合わせを生成
    */
-  generateSingleRound(players, matchHistory, rankHistory, byeCounts, roundIndex) {
+  generateSingleRound(players, matchHistory, rankHistory, byeCounts, roundIndex, gradePenalty = 100, rankWeight = 15) {
     const isOdd = players.length % 2 !== 0;
     let byePlayerId = null;
     let activePlayers = [...players];
@@ -109,10 +117,10 @@ const Matching = {
 
     for (let trial = 0; trial < maxTrials; trial++) {
       const shuffled = this.shuffle([...activePlayers]);
-      const pairs = this.greedyPairing(shuffled, matchHistory, rankHistory);
+      const pairs = this.greedyPairing(shuffled, matchHistory, rankHistory, gradePenalty, rankWeight);
 
       if (pairs) {
-        const score = this.evaluatePairing(pairs, players, rankHistory);
+        const score = this.evaluatePairing(pairs, players, rankHistory, gradePenalty, rankWeight);
         if (score < bestScore) {
           bestScore = score;
           bestPairs = pairs;
@@ -142,7 +150,7 @@ const Matching = {
   /**
    * 貪欲法によるペアリング
    */
-  greedyPairing(players, matchHistory, rankHistory) {
+  greedyPairing(players, matchHistory, rankHistory, gradePenalty = 100, rankWeight = 15) {
     const n = players.length;
     const used = new Set();
     const pairs = [];
@@ -161,7 +169,7 @@ const Matching = {
         // 再戦禁止を絶対条件ではなく極めて重いペナルティとし、生成が100%失敗するのを防ぐ
         const rematchPenalty = isRematch ? 10000 : 0; 
 
-        const score = this.pairScore(players[i], players[j], rankHistory) + rematchPenalty;
+        const score = this.pairScore(players[i], players[j], rankHistory, gradePenalty, rankWeight) + rematchPenalty;
         if (score < bestScore) {
           bestScore = score;
           bestPartner = j;
@@ -181,12 +189,12 @@ const Matching = {
   /**
    * ペアのスコアを計算（低いほど良い）
    */
-  pairScore(p1, p2, rankHistory) {
+  pairScore(p1, p2, rankHistory, gradePenalty = 100, rankWeight = 15) {
     let score = 0;
 
     // 同学年ペナルティ
     if (p1.grade === p2.grade) {
-      score += 100;
+      score += gradePenalty;
     }
 
     // ランク分散ペナルティ
@@ -195,8 +203,8 @@ const Matching = {
     const p2RankHist = rankHistory[p2.id];
 
     if (p1RankHist && p2RankHist) {
-      score += p1RankHist[p2.rank] * 15;
-      score += p2RankHist[p1.rank] * 15;
+      score += p1RankHist[p2.rank] * rankWeight;
+      score += p2RankHist[p1.rank] * rankWeight;
     }
 
     // ランクが近いほど若干の加点（近いランク同士ばかりにならないよう）
@@ -214,14 +222,14 @@ const Matching = {
   /**
    * ペアリング全体の評価スコア
    */
-  evaluatePairing(pairs, allPlayers, rankHistory) {
+  evaluatePairing(pairs, allPlayers, rankHistory, gradePenalty = 100, rankWeight = 15) {
     let totalScore = 0;
     pairs.forEach(([p1, p2]) => {
-      if (p1.grade === p2.grade) totalScore += 100;
+      if (p1.grade === p2.grade) totalScore += gradePenalty;
       const p1Hist = rankHistory[p1.id];
       const p2Hist = rankHistory[p2.id];
-      if (p1Hist) totalScore += p1Hist[p2.rank] * 15;
-      if (p2Hist) totalScore += p2Hist[p1.rank] * 15;
+      if (p1Hist) totalScore += p1Hist[p2.rank] * rankWeight;
+      if (p2Hist) totalScore += p2Hist[p1.rank] * rankWeight;
     });
     return totalScore;
   },
