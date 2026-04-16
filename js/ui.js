@@ -229,6 +229,14 @@ const UI = {
       this.generateMatching();
     });
 
+    document.getElementById('grade-avoid-weight').addEventListener('input', (e) => {
+      this.updateWeightLabel('grade-avoid-label', parseInt(e.target.value));
+    });
+
+    document.getElementById('rank-balance-weight').addEventListener('input', (e) => {
+      this.updateWeightLabel('rank-balance-label', parseInt(e.target.value));
+    });
+
     document.getElementById('clear-rounds-btn').addEventListener('click', () => {
       if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。')) {
         AppStorage.saveRounds([]);
@@ -251,6 +259,8 @@ const UI = {
   generateMatching() {
     const players = AppStorage.getPlayers();
     const numRounds = parseInt(document.getElementById('num-rounds').value);
+    const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
+    const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
 
     if (players.length < 2) {
       this.showToast('最低2人の選手が必要です', 'error');
@@ -265,7 +275,7 @@ const UI = {
 
     // 非同期で実行（UIブロック回避）
     setTimeout(() => {
-      const result = Matching.generateAllRounds(players, numRounds);
+      const result = Matching.generateAllRounds(players, numRounds, { gradeAvoidLevel, rankBalanceLevel });
 
       btn.textContent = originalText;
       btn.disabled = false;
@@ -276,7 +286,7 @@ const UI = {
       }
 
       AppStorage.saveRounds(result.rounds);
-      AppStorage.updateSettings({ numRounds });
+      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel });
       this.renderMatchingResult();
       this.showToast(`全${numRounds}回戦の対戦表を生成しました！`, 'success');
     }, 100);
@@ -526,6 +536,18 @@ const UI = {
   loadSettings() {
     const settings = AppStorage.getSettings();
     document.getElementById('num-rounds').value = settings.numRounds || 5;
+
+    const gradeLevel = settings.gradeAvoidLevel ?? 2;
+    const rankLevel  = settings.rankBalanceLevel ?? 2;
+    document.getElementById('grade-avoid-weight').value  = gradeLevel;
+    document.getElementById('rank-balance-weight').value = rankLevel;
+    this.updateWeightLabel('grade-avoid-label',  gradeLevel);
+    this.updateWeightLabel('rank-balance-label', rankLevel);
+  },
+
+  updateWeightLabel(labelId, level) {
+    const labels = ['無効', '低', '標準', '高', '最高'];
+    document.getElementById(labelId).textContent = labels[level] ?? '標準';
   },
 
   // ============================================
