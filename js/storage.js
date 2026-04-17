@@ -225,6 +225,20 @@ const AppStorage = {
     }
   },
 
+  async updateAdminPassword(newPassword) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const encoded = new TextEncoder().encode(newPassword);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+    const hash = Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    const { error } = await supabaseClient
+      .from('settings')
+      .update({ admin_password_hash: hash })
+      .eq('id', 'global');
+    if (error) throw error;
+  },
+
   generateId() {
     return 'xxxx-xxxx-xxxx'.replace(/x/g, () =>
       Math.floor(Math.random() * 16).toString(16)

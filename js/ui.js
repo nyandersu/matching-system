@@ -14,6 +14,7 @@ const UI = {
     this.bindPlayerFormEvents();
     this.bindMatchingEvents();
     this.bindSettingsEvents();
+    this.bindPasswordChangeEvents();
     
     // 初回のローカル描画
     this.renderAll();
@@ -507,6 +508,57 @@ const UI = {
   // ============================================
   // 設定
   // ============================================
+
+  bindPasswordChangeEvents() {
+    document.getElementById('password-change-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await this.handlePasswordChange();
+    });
+
+    // 入力欄の表示/非表示トグル
+    document.querySelectorAll('.toggle-pw').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.dataset.target);
+        const isText = input.type === 'text';
+        input.type = isText ? 'password' : 'text';
+        btn.textContent = isText ? '👁' : '🙈';
+      });
+    });
+  },
+
+  async handlePasswordChange() {
+    const current  = document.getElementById('pw-current').value;
+    const next     = document.getElementById('pw-new').value;
+    const confirm  = document.getElementById('pw-confirm').value;
+
+    if (!current || !next || !confirm) {
+      this.showToast('すべての項目を入力してください', 'error');
+      return;
+    }
+    if (next.length < 6) {
+      this.showToast('新しいパスワードは6文字以上にしてください', 'error');
+      return;
+    }
+    if (next !== confirm) {
+      this.showToast('新しいパスワードが一致しません', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('pw-submit-btn');
+    btn.disabled = true;
+    btn.textContent = '変更中...';
+
+    try {
+      await AppStorage.updateAdminPassword(next);
+      this.showToast('パスワードを変更しました。次回ログイン時から有効です', 'success');
+      document.getElementById('password-change-form').reset();
+    } catch (err) {
+      this.showToast('変更に失敗しました: ' + err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'パスワードを変更';
+    }
+  },
 
   bindSettingsEvents() {
     document.getElementById('export-standings-btn').addEventListener('click', () => {
