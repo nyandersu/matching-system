@@ -186,6 +186,39 @@
   </div>
 </div>
 
+<!-- パスワード変更 -->
+<div class="pw-section">
+  <details class="pw-details">
+    <summary class="pw-summary">🔑 管理者パスワードを変更</summary>
+    <div class="pw-body">
+      <form id="password-change-form" autocomplete="off">
+        <div class="pw-field">
+          <label class="form-label" for="pw-current">現在のパスワード</label>
+          <div class="pw-input-wrap">
+            <input type="password" id="pw-current" class="form-input" placeholder="現在のパスワード" required>
+            <button type="button" class="toggle-pw" data-target="pw-current">👁</button>
+          </div>
+        </div>
+        <div class="pw-field">
+          <label class="form-label" for="pw-new">新しいパスワード <span class="pw-hint">（6文字以上）</span></label>
+          <div class="pw-input-wrap">
+            <input type="password" id="pw-new" class="form-input" placeholder="新しいパスワード" required>
+            <button type="button" class="toggle-pw" data-target="pw-new">👁</button>
+          </div>
+        </div>
+        <div class="pw-field">
+          <label class="form-label" for="pw-confirm">新しいパスワード（確認）</label>
+          <div class="pw-input-wrap">
+            <input type="password" id="pw-confirm" class="form-input" placeholder="もう一度入力" required>
+            <button type="button" class="toggle-pw" data-target="pw-confirm">👁</button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" id="pw-submit-btn">パスワードを変更</button>
+      </form>
+    </div>
+  </details>
+</div>
+
 <!-- Toast Container -->
 <div id="toast-container"></div>
 
