@@ -238,6 +238,10 @@ const UI = {
       this.updateWeightLabel('rank-balance-label', parseInt(e.target.value));
     });
 
+    document.getElementById('matching-format').addEventListener('change', () => {
+      this.updateGenerateButton();
+    });
+
     document.getElementById('clear-rounds-btn').addEventListener('click', () => {
       if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。')) {
         AppStorage.saveRounds([]);
@@ -258,39 +262,123 @@ const UI = {
   },
 
   generateMatching() {
-    const players = AppStorage.getPlayers();
-    const numRounds = parseInt(document.getElementById('num-rounds').value);
+    const players        = AppStorage.getPlayers();
+    const numRounds      = parseInt(document.getElementById('num-rounds').value);
     const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
     const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
+    const matchingFormat   = document.getElementById('matching-format').value;
 
     if (players.length < 2) {
       this.showToast('最低2人の選手が必要です', 'error');
       return;
     }
 
-    // 生成中表示
     const btn = document.getElementById('generate-btn');
-    const originalText = btn.textContent;
     btn.textContent = '生成中...';
     btn.disabled = true;
 
-    // 非同期で実行（UIブロック回避）
     setTimeout(() => {
-      const result = Matching.generateAllRounds(players, numRounds, { gradeAvoidLevel, rankBalanceLevel });
+      const settings = AppStorage.getSettings();
+      const opts = { gradeAvoidLevel, rankBalanceLevel, byeCountsAsWin: settings.byeCountsAsWin };
 
-      btn.textContent = originalText;
-      btn.disabled = false;
-
-      if (result.error) {
-        this.showToast(result.error, 'error');
-        return;
+      if (matchingFormat === 'swiss') {
+        this._generateSwissRound(players, numRounds, opts);
+      } else {
+        this._generateAllRoundsRandom(players, numRounds, opts);
       }
 
-      AppStorage.saveRounds(result.rounds);
-      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel });
+      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel, matchingFormat });
       this.renderMatchingResult();
-      this.showToast(`全${numRounds}回戦の対戦表を生成しました！`, 'success');
     }, 100);
+  },
+
+  _generateAllRoundsRandom(players, numRounds, opts) {
+    const btn    = document.getElementById('generate-btn');
+    const result = Matching.generateAllRounds(players, numRounds, opts);
+
+    btn.textContent = '⚡ 対戦表を生成';
+    btn.disabled    = false;
+
+    if (result.error) {
+      this.showToast(result.error, 'error');
+      return;
+    }
+    AppStorage.saveRounds(result.rounds);
+    this.showToast(`全${numRounds}回戦の対戦表を生成しました！`, 'success');
+  },
+
+  _generateSwissRound(players, numRounds, opts) {
+    const btn          = document.getElementById('generate-btn');
+    const existingRounds = AppStorage.getRounds();
+
+    // 上限チェック
+    if (existingRounds.length >= numRounds) {
+      btn.textContent = `✓ 全${numRounds}回戦完了`;
+      btn.disabled    = true;
+      this.showToast('全ラウンド完了しています', 'info');
+      return;
+    }
+
+    // 前ラウンドの結果が未入力なら生成不可
+    if (existingRounds.length > 0) {
+      const last = existingRounds[existingRounds.length - 1];
+      if (last.matches.some(m => m.result === null)) {
+        btn.textContent = `⚡ 第${existingRounds.length + 1}回戦を生成`;
+        btn.disabled    = false;
+        this.showToast(`第${existingRounds.length}回戦の結果をすべて入力してください`, 'error');
+        return;
+      }
+    }
+
+    const result = Matching.generateNextSwissRound(players, existingRounds, opts);
+
+    if (result.error) {
+      btn.textContent = `⚡ 第${existingRounds.length + 1}回戦を生成`;
+      btn.disabled    = false;
+      this.showToast(result.error, 'error');
+      return;
+    }
+
+    const updatedRounds = [...existingRounds, result.round];
+    AppStorage.saveRounds(updatedRounds);
+
+    const next = updatedRounds.length + 1;
+    if (updatedRounds.length >= numRounds) {
+      btn.textContent = `✓ 全${numRounds}回戦完了`;
+      btn.disabled    = true;
+    } else {
+      btn.textContent = `⚡ 第${next}回戦を生成`;
+      btn.disabled    = false;
+    }
+    this.showToast(`第${result.round.roundNumber}回戦の対戦表を生成しました！`, 'success');
+  },
+
+  // フォーマット・ラウンド数に応じてボタン表示を更新
+  updateGenerateButton() {
+    const format    = document.getElementById('matching-format').value;
+    const numRounds = parseInt(document.getElementById('num-rounds').value);
+    const btn       = document.getElementById('generate-btn');
+    const rounds    = AppStorage.getRounds();
+
+    if (format === 'random') {
+      btn.textContent = '⚡ 対戦表を生成';
+      btn.disabled    = false;
+      return;
+    }
+
+    // スイスドロー
+    if (rounds.length === 0) {
+      btn.textContent = '⚡ 第1回戦を生成';
+      btn.disabled    = false;
+    } else if (rounds.length >= numRounds) {
+      btn.textContent = `✓ 全${numRounds}回戦完了`;
+      btn.disabled    = true;
+    } else {
+      const last    = rounds[rounds.length - 1];
+      const allDone = last.matches.every(m => m.result !== null);
+      btn.textContent = `⚡ 第${rounds.length + 1}回戦を生成`;
+      btn.disabled    = !allDone;
+    }
   },
 
   renderMatchingResult() {
@@ -425,6 +513,7 @@ const UI = {
   setResult(roundIndex, matchIndex, result) {
     AppStorage.updateMatchResult(roundIndex, matchIndex, result);
     this.renderRounds();
+    this.updateGenerateButton();
   },
 
   // ============================================
@@ -587,7 +676,8 @@ const UI = {
 
   loadSettings() {
     const settings = AppStorage.getSettings();
-    document.getElementById('num-rounds').value = settings.numRounds || 5;
+    document.getElementById('num-rounds').value       = settings.numRounds || 5;
+    document.getElementById('matching-format').value  = settings.matchingFormat || 'random';
 
     const gradeLevel = settings.gradeAvoidLevel ?? 2;
     const rankLevel  = settings.rankBalanceLevel ?? 2;
@@ -595,6 +685,7 @@ const UI = {
     document.getElementById('rank-balance-weight').value = rankLevel;
     this.updateWeightLabel('grade-avoid-label',  gradeLevel);
     this.updateWeightLabel('rank-balance-label', rankLevel);
+    this.updateGenerateButton();
   },
 
   updateWeightLabel(labelId, level) {

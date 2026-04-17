@@ -155,7 +155,7 @@ const AppStorage = {
     return {
       players: [],
       rounds: [],
-      settings: { numRounds: 5, byeCountsAsWin: true, gradeAvoidLevel: 2, rankBalanceLevel: 2 }
+      settings: { numRounds: 5, byeCountsAsWin: true, gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random' }
     };
   },
 
