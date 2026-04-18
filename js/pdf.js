@@ -179,7 +179,7 @@ const PDF = {
             <th>勝</th>
             <th>敗</th>
             <th>分</th>
-            <th>不戦</th>
+            <th>不戦勝</th>
             <th>勝率</th>
             <th>ポイント</th>
           </tr>

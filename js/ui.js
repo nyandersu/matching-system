@@ -644,7 +644,7 @@ const UI = {
           </div>
           ${round.byePlayerId && playerMap[round.byePlayerId] ? `
             <div class="bye-info">
-              <span class="bye-label">不戦:</span>
+              <span class="bye-label">不戦勝:</span>
               <span>${this.escapeHtml(playerMap[round.byePlayerId].name)}</span>
             </div>` : ''}
         </div>`;
@@ -727,7 +727,7 @@ const UI = {
           </div>
           ${round.byePlayerId && playerMap[round.byePlayerId] ? `
             <div class="bye-info">
-              <span class="bye-label">不戦:</span>
+              <span class="bye-label">不戦勝:</span>
               <span>${this.escapeHtml(playerMap[round.byePlayerId].name)}</span>
             </div>` : ''}
         </div>`;
@@ -762,7 +762,7 @@ const UI = {
       return;
     }
 
-    const standings = Matching.calculateStandings(players, rounds, settings.byeCountsAsWin);
+    const standings = Matching.calculateStandings(players, rounds, true);
 
     // 完了数
     let totalMatches = 0, completedMatches = 0;
@@ -792,7 +792,7 @@ const UI = {
               <th>勝</th>
               <th>敗</th>
               <th>分</th>
-              <th>不戦</th>
+              <th>不戦勝</th>
               <th>勝率</th>
               <th>Pt</th>
             </tr>
@@ -884,7 +884,7 @@ const UI = {
         this.showToast('エクスポートするデータがありません', 'error');
         return;
       }
-      const standings = Matching.calculateStandings(players, rounds, settings.byeCountsAsWin);
+      const standings = Matching.calculateStandings(players, rounds, true);
       PDF.exportStandings(standings);
     });
 

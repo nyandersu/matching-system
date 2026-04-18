@@ -131,16 +131,14 @@ const Matching = {
     const rankLevel    = options.rankBalanceLevel ?? 2;
     const gradePenalty = this.GRADE_PENALTIES[gradeLevel] ?? 100;
     const rankWeight   = this.RANK_WEIGHTS[rankLevel]     ?? 15;
-    const byeAsWin     = options.byeCountsAsWin ?? true;
-
     const { matchHistory, rankHistory, byeCounts } = this.buildHistoryFromRounds(players, existingRounds);
     const roundIndex = existingRounds.length;
 
-    // 現在の得点マップを構築
+    // 現在の得点マップを構築（空き手合いは常に不戦勝扱い）
     const pointsMap = {};
     players.forEach(p => { pointsMap[p.id] = 0; });
     if (existingRounds.length > 0) {
-      this.calculateStandings(players, existingRounds, byeAsWin)
+      this.calculateStandings(players, existingRounds, true)
         .forEach(s => { pointsMap[s.id] = s.points; });
     }
 
