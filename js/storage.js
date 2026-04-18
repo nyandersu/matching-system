@@ -184,8 +184,7 @@ const AppStorage = {
       const data = this.getDefaultData();
 
       if (sQuery.data) {
-        data.settings.numRounds      = sQuery.data.num_rounds;
-        data.settings.byeCountsAsWin = sQuery.data.bye_counts_as_win;
+        data.settings.numRounds = sQuery.data.num_rounds;
       }
 
       if (pQuery.data) {
@@ -216,8 +215,8 @@ const AppStorage = {
     try {
       await supabaseClient.from('settings').upsert({
         id: 'global',
-        num_rounds:       data.settings.numRounds,
-        bye_counts_as_win: data.settings.byeCountsAsWin
+        num_rounds:        data.settings.numRounds,
+        bye_counts_as_win: true   // 常に不戦勝扱い
       });
 
       if (data.players.length > 0) {
@@ -275,7 +274,7 @@ const AppStorage = {
       players: [],
       rounds:  [],
       settings: {
-        numRounds: 5, byeCountsAsWin: true,
+        numRounds: 5,
         gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random'
       }
     };
