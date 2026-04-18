@@ -1249,6 +1249,162 @@ body::before {
   font-weight: 400;
 }
 
+/* --- Login Overlay --- */
+#login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background-image:
+    radial-gradient(circle at 20% 50%, rgba(230, 168, 23, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(167, 139, 250, 0.05) 0%, transparent 50%);
+}
+
+#login-overlay.hidden { display: none; }
+
+.login-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 40px 36px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(230, 168, 23, 0.05);
+  text-align: center;
+}
+
+.login-logo {
+  font-size: 52px;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 4px 12px rgba(230, 168, 23, 0.3));
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--amber-light), var(--gold), var(--amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+}
+
+/* ログイン/登録タブ */
+.login-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  margin-bottom: 24px;
+}
+
+.login-tab {
+  flex: 1;
+  padding: 9px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.login-tab:hover {
+  color: var(--text-primary);
+}
+
+.login-tab.active {
+  background: var(--amber-glow);
+  color: var(--amber-light);
+}
+
+/* フォーム内のボタン */
+.login-submit-btn {
+  width: 100%;
+  padding: 13px;
+  font-size: 15px;
+  margin-top: 8px;
+}
+
+/* エラーメッセージ */
+.login-error {
+  font-size: 13px;
+  color: var(--accent-red);
+  background: rgba(231, 76, 90, 0.1);
+  border: 1px solid rgba(231, 76, 90, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.login-error.hidden { display: none; }
+
+/* --- User Info Bar (header) --- */
+.header-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.user-info-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+}
+
+.user-info-bar.hidden { display: none; }
+
+.user-icon {
+  font-size: 13px;
+}
+
+.user-display-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.btn-logout {
+  background: none;
+  border: 1px solid rgba(231, 76, 90, 0.3);
+  border-radius: 4px;
+  color: var(--accent-red);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 8px;
+  opacity: 0.8;
+  transition: var(--transition-fast);
+}
+
+.btn-logout:hover {
+  opacity: 1;
+  background: rgba(231, 76, 90, 0.1);
+  border-color: var(--accent-red);
+}
+
 /* --- Room Selector Overlay --- */
 #room-selector-overlay {
   position: fixed;

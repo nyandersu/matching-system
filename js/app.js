@@ -3,20 +3,28 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 1. ログインチェック
+  const session = AppStorage.getSession();
+  if (!session) {
+    UI.showLoginScreen();
+    return;
+  }
+
+  // 2. 部屋チェック
   const params    = new URLSearchParams(window.location.search);
   const roomParam = params.get('room');
 
   if (!roomParam) {
-    // 部屋が指定されていなければ部屋選択画面を表示
     UI.showRoomSelector();
-  } else {
-    AppStorage.setRoom(roomParam);
-    UI.init();
+    return;
+  }
 
-    // 初回表示時に保存済みマッチングがあれば表示
-    const rounds = AppStorage.getRounds();
-    if (rounds.length > 0) {
-      UI.renderMatchingResult();
-    }
+  // 3. メインアプリ起動
+  AppStorage.setRoom(roomParam);
+  UI.init();
+
+  const rounds = AppStorage.getRounds();
+  if (rounds.length > 0) {
+    UI.renderMatchingResult();
   }
 });

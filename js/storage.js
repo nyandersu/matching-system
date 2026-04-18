@@ -1,18 +1,100 @@
 /**
  * storage.js — LocalStorage & Supabase 同期モジュール
  * オフライン時はLocalStorage、オンライン時はSupabaseと同期する
- * 部屋（roomId）ごとにデータを分離する
+ * アカウントごとに部屋を管理し、部屋（roomId）ごとにデータを分離する
  */
 
 const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-const ROOM_HISTORY_KEY = 'shogi_room_history';  // 最近使った部屋一覧
+const SESSION_KEY = 'shogi_session';  // ログインセッション
 
 const AppStorage = {
   _isSyncing: false,
   roomId: null,   // 現在の部屋ID（null = 未選択）
+
+  // ============================================
+  // セッション管理（ログイン・ログアウト）
+  // ============================================
+
+  /** セッション取得（未ログイン時は null） */
+  getSession() {
+    try {
+      return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  },
+
+  /** セッション保存 */
+  saveSession(accountId, username) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ accountId, username }));
+  },
+
+  /** ログアウト */
+  clearSession() {
+    localStorage.removeItem(SESSION_KEY);
+  },
+
+  /** ログイン（Supabaseで照合してセッション保存） */
+  async login(username, password) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const hash = await this._sha256(password);
+    const { data, error } = await supabaseClient
+      .from('accounts')
+      .select('id, username')
+      .eq('username', username.trim())
+      .eq('password_hash', hash)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('ユーザー名またはパスワードが違います');
+    this.saveSession(data.id, data.username);
+    return data;
+  },
+
+  /** 新規アカウント登録 */
+  async register(username, password) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const hash = await this._sha256(password);
+    const { data, error } = await supabaseClient
+      .from('accounts')
+      .insert({ username: username.trim(), password_hash: hash })
+      .select('id, username')
+      .single();
+    if (error) {
+      if (error.code === '23505') throw new Error('そのユーザー名はすでに使われています');
+      throw error;
+    }
+    this.saveSession(data.id, data.username);
+    return data;
+  },
+
+  /** パスワード変更（現在ログイン中のアカウント） */
+  async updatePassword(currentPassword, newPassword) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const session = this.getSession();
+    if (!session) throw new Error('ログインが必要です');
+
+    // 現在のパスワードを確認
+    const currentHash = await this._sha256(currentPassword);
+    const { data: account, error: fetchErr } = await supabaseClient
+      .from('accounts')
+      .select('id')
+      .eq('id', session.accountId)
+      .eq('password_hash', currentHash)
+      .maybeSingle();
+    if (fetchErr) throw fetchErr;
+    if (!account) throw new Error('現在のパスワードが違います');
+
+    // 新しいパスワードに更新
+    const newHash = await this._sha256(newPassword);
+    const { error } = await supabaseClient
+      .from('accounts')
+      .update({ password_hash: newHash })
+      .eq('id', session.accountId);
+    if (error) throw error;
+  },
 
   // ============================================
   // 部屋管理
@@ -21,6 +103,12 @@ const AppStorage = {
   /** 部屋IDに対応するローカルストレージキー */
   getStorageKey() {
     return `shogi_${this.roomId || '_default'}`;
+  },
+
+  /** アカウントごとの部屋履歴キー */
+  _getRoomHistoryKey() {
+    const session = this.getSession();
+    return `shogi_room_history_${session?.accountId || '_anon'}`;
   },
 
   /** ランダムな6文字の部屋コードを生成（見間違えやすい文字を除外） */
@@ -38,10 +126,10 @@ const AppStorage = {
     return this.roomId;
   },
 
-  /** 最近使った部屋リストを取得 */
+  /** 最近使った部屋リストを取得（アカウントごとに分離） */
   getRoomHistory() {
     try {
-      return JSON.parse(localStorage.getItem(ROOM_HISTORY_KEY) || '[]');
+      return JSON.parse(localStorage.getItem(this._getRoomHistoryKey()) || '[]');
     } catch {
       return [];
     }
@@ -50,7 +138,7 @@ const AppStorage = {
   _addToRoomHistory(roomId) {
     const history = this.getRoomHistory().filter(r => r !== roomId);
     history.unshift(roomId);
-    localStorage.setItem(ROOM_HISTORY_KEY, JSON.stringify(history.slice(0, 5)));
+    localStorage.setItem(this._getRoomHistoryKey(), JSON.stringify(history.slice(0, 5)));
   },
 
   // ============================================
@@ -251,21 +339,18 @@ const AppStorage = {
     }
   },
 
-  async updateAdminPassword(newPassword) {
-    if (!supabaseClient) throw new Error('Supabase未接続');
-    const encoded = new TextEncoder().encode(newPassword);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-    const hash = Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-    const { error } = await supabaseClient
-      .from('settings').update({ admin_password_hash: hash }).eq('id', 'global');
-    if (error) throw error;
-  },
-
   generateId() {
     return 'xxxx-xxxx-xxxx'.replace(/x/g, () =>
       Math.floor(Math.random() * 16).toString(16)
     );
+  },
+
+  /** SHA-256ハッシュ（共通ユーティリティ） */
+  async _sha256(text) {
+    const encoded = new TextEncoder().encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 };

@@ -31,6 +31,105 @@ const UI = {
   },
 
   // ============================================
+  // ログイン画面
+  // ============================================
+
+  showLoginScreen() {
+    document.getElementById('app-main').classList.add('hidden');
+    document.getElementById('room-selector-overlay').classList.add('hidden');
+    const overlay = document.getElementById('login-overlay');
+    overlay.classList.remove('hidden');
+
+    // タブ切り替え
+    overlay.querySelectorAll('.login-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        overlay.querySelectorAll('.login-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const isLogin = tab.dataset.tab === 'login';
+        document.getElementById('login-form').classList.toggle('hidden', !isLogin);
+        document.getElementById('register-form').classList.toggle('hidden', isLogin);
+        document.getElementById('login-error').classList.add('hidden');
+        document.getElementById('register-error').classList.add('hidden');
+      });
+    });
+
+    // 目のアイコン（パスワード表示切り替え）
+    overlay.querySelectorAll('.toggle-pw').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const input = document.getElementById(btn.dataset.target);
+        const isText = input.type === 'text';
+        input.type = isText ? 'password' : 'text';
+        btn.textContent = isText ? '👁' : '🙈';
+      });
+    });
+
+    // ログインフォーム送信
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('login-submit-btn');
+      const errEl = document.getElementById('login-error');
+      const username = document.getElementById('login-username').value;
+      const password = document.getElementById('login-password').value;
+
+      btn.disabled = true;
+      btn.textContent = '確認中...';
+      errEl.classList.add('hidden');
+
+      try {
+        await AppStorage.login(username, password);
+        // ログイン成功 → ページリロードして部屋選択へ
+        window.location.reload();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'ログイン';
+      }
+    });
+
+    // 登録フォーム送信
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('register-submit-btn');
+      const errEl = document.getElementById('register-error');
+      const username = document.getElementById('register-username').value;
+      const password = document.getElementById('register-password').value;
+      const confirm  = document.getElementById('register-confirm').value;
+
+      errEl.classList.add('hidden');
+
+      if (username.trim().length < 4) {
+        errEl.textContent = 'ユーザー名は4文字以上にしてください';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (password.length < 6) {
+        errEl.textContent = 'パスワードは6文字以上にしてください';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (password !== confirm) {
+        errEl.textContent = 'パスワードが一致しません';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '作成中...';
+
+      try {
+        await AppStorage.register(username, password);
+        window.location.reload();
+      } catch (err) {
+        errEl.textContent = err.message;
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'アカウントを作成';
+      }
+    });
+  },
+
+  // ============================================
   // 部屋選択
   // ============================================
 
@@ -102,6 +201,7 @@ const UI = {
   },
 
   _showRoomBadge() {
+    // 部屋コードバッジ
     const bar = document.getElementById('room-info-bar');
     const display = document.getElementById('room-code-display');
     if (bar && display && AppStorage.roomId) {
@@ -112,6 +212,22 @@ const UI = {
         const url = new URL(window.location.href);
         url.searchParams.delete('room');
         window.location.href = url.toString();
+      });
+    }
+
+    // ユーザー情報バー
+    const userBar = document.getElementById('user-info-bar');
+    const userNameEl = document.getElementById('user-display-name');
+    const session = AppStorage.getSession();
+    if (userBar && session) {
+      userNameEl.textContent = session.username;
+      userBar.classList.remove('hidden');
+
+      document.getElementById('logout-btn').addEventListener('click', () => {
+        if (confirm('ログアウトしますか？')) {
+          AppStorage.clearSession();
+          window.location.href = window.location.pathname; // room param も消す
+        }
       });
     }
   },
@@ -727,8 +843,8 @@ const UI = {
     btn.textContent = '変更中...';
 
     try {
-      await AppStorage.updateAdminPassword(next);
-      this.showToast('パスワードを変更しました。次回ログイン時から有効です', 'success');
+      await AppStorage.updatePassword(current, next);
+      this.showToast('パスワードを変更しました', 'success');
       document.getElementById('password-change-form').reset();
     } catch (err) {
       this.showToast('変更に失敗しました: ' + err.message, 'error');

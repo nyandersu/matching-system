@@ -20,6 +20,61 @@
 </head>
 <body>
 
+<!-- ログインオーバーレイ -->
+<div id="login-overlay" class="hidden">
+  <div class="login-card">
+    <div class="login-logo">♛</div>
+    <h1 class="login-title">将棋部内戦マッチング</h1>
+    <p class="login-subtitle">ログインして大会を管理する</p>
+
+    <div class="login-tabs">
+      <button class="login-tab active" data-tab="login">ログイン</button>
+      <button class="login-tab" data-tab="register">新規登録</button>
+    </div>
+
+    <!-- ログインフォーム -->
+    <form id="login-form" autocomplete="on">
+      <div class="form-group">
+        <label class="form-label" for="login-username">ユーザー名</label>
+        <input type="text" id="login-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="login-password">パスワード</label>
+        <div class="pw-input-wrap">
+          <input type="password" id="login-password" class="form-input" placeholder="パスワード" autocomplete="current-password" required>
+          <button type="button" class="toggle-pw" data-target="login-password">👁</button>
+        </div>
+      </div>
+      <p id="login-error" class="login-error hidden"></p>
+      <button type="submit" class="btn btn-primary login-submit-btn" id="login-submit-btn">ログイン</button>
+    </form>
+
+    <!-- 新規登録フォーム -->
+    <form id="register-form" class="hidden" autocomplete="on">
+      <div class="form-group">
+        <label class="form-label" for="register-username">ユーザー名 <span class="pw-hint">（4文字以上）</span></label>
+        <input type="text" id="register-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="register-password">パスワード <span class="pw-hint">（6文字以上）</span></label>
+        <div class="pw-input-wrap">
+          <input type="password" id="register-password" class="form-input" placeholder="パスワード" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="register-password">👁</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="register-confirm">パスワード（確認）</label>
+        <div class="pw-input-wrap">
+          <input type="password" id="register-confirm" class="form-input" placeholder="もう一度入力" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="register-confirm">👁</button>
+        </div>
+      </div>
+      <p id="register-error" class="login-error hidden"></p>
+      <button type="submit" class="btn btn-primary login-submit-btn" id="register-submit-btn">アカウントを作成</button>
+    </form>
+  </div>
+</div>
+
 <!-- 部屋選択オーバーレイ -->
 <div id="room-selector-overlay" class="hidden">
   <div class="room-selector-card">
@@ -63,10 +118,17 @@
     <span class="app-logo">♛</span>
     <h1 class="app-title">将棋部内戦マッチングシステム</h1>
     <p class="app-subtitle">団体戦メンバー選考用 — 対戦組み合わせ自動生成 &amp; 成績管理</p>
-    <div id="room-info-bar" class="room-info-bar hidden">
-      <span class="room-info-label">部屋:</span>
-      <span id="room-code-display" class="room-code-display"></span>
-      <button id="change-room-btn" class="btn-change-room" title="部屋を変更">変更</button>
+    <div class="header-meta">
+      <div id="room-info-bar" class="room-info-bar hidden">
+        <span class="room-info-label">部屋:</span>
+        <span id="room-code-display" class="room-code-display"></span>
+        <button id="change-room-btn" class="btn-change-room" title="部屋を変更">変更</button>
+      </div>
+      <div id="user-info-bar" class="user-info-bar hidden">
+        <span class="user-icon">👤</span>
+        <span id="user-display-name" class="user-display-name"></span>
+        <button id="logout-btn" class="btn-logout" title="ログアウト">ログアウト</button>
+      </div>
     </div>
   </header>
 
@@ -238,7 +300,7 @@
 <!-- パスワード変更 -->
 <div class="pw-section">
   <details class="pw-details">
-    <summary class="pw-summary">🔑 管理者パスワードを変更</summary>
+    <summary class="pw-summary">🔑 パスワードを変更</summary>
     <div class="pw-body">
       <form id="password-change-form" autocomplete="off">
         <div class="pw-field">
