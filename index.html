@@ -237,23 +237,25 @@
         </div>
         <div class="form-group weight-group">
           <label class="form-label">同学年対決の回避</label>
-          <div class="weight-control">
-            <input type="range" id="grade-avoid-weight" class="weight-slider" min="0" max="4" step="1" value="2">
-            <div class="weight-steps">
-              <span>無効</span><span>低</span><span>標準</span><span>高</span><span>最高</span>
-            </div>
+          <div class="weight-segment" id="grade-avoid-segment">
+            <button type="button" class="wseg-btn" data-value="0">無効</button>
+            <button type="button" class="wseg-btn" data-value="1">低</button>
+            <button type="button" class="wseg-btn wseg-active" data-value="2">標準</button>
+            <button type="button" class="wseg-btn" data-value="3">高</button>
+            <button type="button" class="wseg-btn" data-value="4">最高</button>
           </div>
-          <span class="weight-badge" id="grade-avoid-label">標準</span>
+          <input type="hidden" id="grade-avoid-weight" value="2">
         </div>
         <div class="form-group weight-group">
           <label class="form-label">ランク帯の均等化</label>
-          <div class="weight-control">
-            <input type="range" id="rank-balance-weight" class="weight-slider" min="0" max="4" step="1" value="2">
-            <div class="weight-steps">
-              <span>無効</span><span>低</span><span>標準</span><span>高</span><span>最高</span>
-            </div>
+          <div class="weight-segment" id="rank-balance-segment">
+            <button type="button" class="wseg-btn" data-value="0">無効</button>
+            <button type="button" class="wseg-btn" data-value="1">低</button>
+            <button type="button" class="wseg-btn wseg-active" data-value="2">標準</button>
+            <button type="button" class="wseg-btn" data-value="3">高</button>
+            <button type="button" class="wseg-btn" data-value="4">最高</button>
           </div>
-          <span class="weight-badge" id="rank-balance-label">標準</span>
+          <input type="hidden" id="rank-balance-weight" value="2">
         </div>
         <button class="btn btn-primary" id="generate-btn">
           ⚡ 対戦表を生成
@@ -266,6 +268,11 @@
         </button>
       </div>
     </div>
+    <div class="display-opts-bar" id="matching-display-opts">
+      <span class="display-opts-label">表示項目</span>
+      <button type="button" class="display-chip active" data-key="grade">学年</button>
+      <button type="button" class="display-chip active" data-key="rank">ランク</button>
+    </div>
     <div id="matching-result"></div>
   </div>
 
@@ -277,6 +284,11 @@
       <p style="font-size:13px;color:var(--text-secondary);">
         各対局の結果を入力してください。左側の <strong>○</strong> は先手（左）の勝ち、右側の <strong>○</strong> は後手（右）の勝ち、<strong>△</strong> は引き分けです。
       </p>
+    </div>
+    <div class="display-opts-bar" id="results-display-opts">
+      <span class="display-opts-label">表示項目</span>
+      <button type="button" class="display-chip active" data-key="grade">学年</button>
+      <button type="button" class="display-chip active" data-key="rank">ランク</button>
     </div>
     <div id="results-container"></div>
   </div>

@@ -5,6 +5,7 @@
 const UI = {
   currentTab: 'players',
   editingPlayerId: null,
+  displayOpts: { showGrade: true, showRank: true },
 
   /**
    * 初期化
@@ -13,6 +14,7 @@ const UI = {
     this.bindTabEvents();
     this.bindPlayerFormEvents();
     this.bindMatchingEvents();
+    this.bindDisplayOpts();
     this.bindSettingsEvents();
     this.bindPasswordChangeEvents();
 
@@ -435,12 +437,16 @@ const UI = {
       this.generateMatching();
     });
 
-    document.getElementById('grade-avoid-weight').addEventListener('input', (e) => {
-      this.updateWeightLabel('grade-avoid-label', parseInt(e.target.value));
-    });
-
-    document.getElementById('rank-balance-weight').addEventListener('input', (e) => {
-      this.updateWeightLabel('rank-balance-label', parseInt(e.target.value));
+    // セグメントコントロール（同学年回避・ランク均等化）
+    ['grade-avoid', 'rank-balance'].forEach(id => {
+      document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll(`#${id}-segment .wseg-btn`)
+            .forEach(b => b.classList.remove('wseg-active'));
+          btn.classList.add('wseg-active');
+          document.getElementById(`${id}-weight`).value = btn.dataset.value;
+        });
+      });
     });
 
     document.getElementById('matching-format').addEventListener('change', () => {
@@ -462,7 +468,7 @@ const UI = {
         this.showToast('エクスポートする対戦表がありません', 'error');
         return;
       }
-      PDF.exportMatchTable(rounds, players);
+      PDF.exportMatchTable(rounds, players, this.displayOpts);
     });
   },
 
@@ -614,20 +620,23 @@ const UI = {
           <div class="match-list">
             ${round.matches.map((match, i) => {
               const resultClass = match.result ? 'has-result' : '';
+              const { showGrade, showRank } = this.displayOpts;
               return `
                 <div class="match-card ${resultClass}">
                   <div class="match-number">${i + 1}</div>
                   <div class="match-player player1 ${match.result === 'player1' ? 'winner' : match.result === 'player2' ? 'loser' : ''}">
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player1Name)}</span>
-                      <span class="player-grade-text">${match.player1Grade}年</span>
+                      ${showGrade ? `<span class="player-grade-text">${match.player1Grade}年</span>` : ''}
+                      ${showRank  ? `<span class="rank-badge rank-${match.player1Rank}">${match.player1Rank}</span>` : ''}
                     </span>
                   </div>
                   <div class="match-vs">VS</div>
                   <div class="match-player player2 ${match.result === 'player2' ? 'winner' : match.result === 'player1' ? 'loser' : ''}">
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player2Name)}</span>
-                      <span class="player-grade-text">${match.player2Grade}年</span>
+                      ${showGrade ? `<span class="player-grade-text">${match.player2Grade}年</span>` : ''}
+                      ${showRank  ? `<span class="rank-badge rank-${match.player2Rank}">${match.player2Rank}</span>` : ''}
                     </span>
                   </div>
                 </div>`;
@@ -681,10 +690,21 @@ const UI = {
             <div class="progress-fill" style="width: ${progressPct}%"></div>
           </div>
           <div class="result-list">
-            ${round.matches.map((match, mi) => `
+            ${round.matches.map((match, mi) => {
+              const { showGrade, showRank } = this.displayOpts;
+              const p1meta = [
+                showGrade ? `${match.player1Grade}年` : '',
+                showRank  ? match.player1Rank : ''
+              ].filter(Boolean).join(' ');
+              const p2meta = [
+                showGrade ? `${match.player2Grade}年` : '',
+                showRank  ? match.player2Rank : ''
+              ].filter(Boolean).join(' ');
+              return `
               <div class="result-row ${match.result ? 'completed' : ''}">
                 <div class="result-player p1 ${match.result === 'player1' ? 'winner' : ''}">
-                  <span>${this.escapeHtml(match.player1Name)}</span>
+                  <span class="result-player-name">${this.escapeHtml(match.player1Name)}</span>
+                  ${p1meta ? `<span class="result-player-meta">${p1meta}</span>` : ''}
                 </div>
                 <div class="result-buttons">
                   <button class="result-btn win-btn ${match.result === 'player1' ? 'active' : ''}"
@@ -699,10 +719,11 @@ const UI = {
                   ` : ''}
                 </div>
                 <div class="result-player p2 ${match.result === 'player2' ? 'winner' : ''}">
-                  <span>${this.escapeHtml(match.player2Name)}</span>
+                  <span class="result-player-name">${this.escapeHtml(match.player2Name)}</span>
+                  ${p2meta ? `<span class="result-player-meta">${p2meta}</span>` : ''}
                 </div>
-              </div>
-            `).join('')}
+              </div>`;
+            }).join('')}
           </div>
           ${round.byePlayerId && playerMap[round.byePlayerId] ? `
             <div class="bye-info">
@@ -886,16 +907,38 @@ const UI = {
 
     const gradeLevel = settings.gradeAvoidLevel ?? 2;
     const rankLevel  = settings.rankBalanceLevel ?? 2;
-    document.getElementById('grade-avoid-weight').value  = gradeLevel;
-    document.getElementById('rank-balance-weight').value = rankLevel;
-    this.updateWeightLabel('grade-avoid-label',  gradeLevel);
-    this.updateWeightLabel('rank-balance-label', rankLevel);
+    this._setSegmentValue('grade-avoid', gradeLevel);
+    this._setSegmentValue('rank-balance', rankLevel);
     this.updateGenerateButton();
   },
 
-  updateWeightLabel(labelId, level) {
-    const labels = ['無効', '低', '標準', '高', '最高'];
-    document.getElementById(labelId).textContent = labels[level] ?? '標準';
+  _setSegmentValue(id, value) {
+    document.getElementById(`${id}-weight`).value = value;
+    document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
+      btn.classList.toggle('wseg-active', parseInt(btn.dataset.value) === parseInt(value));
+    });
+  },
+
+  // ============================================
+  // 表示オプション（学年・ランク）
+  // ============================================
+
+  bindDisplayOpts() {
+    document.querySelectorAll('.display-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const key = chip.dataset.key;
+        const optKey = key === 'grade' ? 'showGrade' : 'showRank';
+        this.displayOpts[optKey] = !this.displayOpts[optKey];
+
+        // 同じ key のチップを全タブで同期
+        document.querySelectorAll(`.display-chip[data-key="${key}"]`).forEach(c => {
+          c.classList.toggle('active', this.displayOpts[optKey]);
+        });
+
+        this.renderMatchingResult();
+        this.renderRounds();
+      });
+    });
   },
 
   // ============================================

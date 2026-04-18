@@ -5,11 +5,12 @@
 const PDF = {
   /**
    * 対戦表をPDFとしてエクスポート
+   * @param {Object} opts - { showGrade, showRank }
    */
-  async exportMatchTable(rounds, players) {
+  async exportMatchTable(rounds, players, opts = { showGrade: true, showRank: true }) {
     const container = document.createElement('div');
     container.className = 'pdf-export';
-    container.innerHTML = this.buildMatchTableHTML(rounds, players);
+    container.innerHTML = this.buildMatchTableHTML(rounds, players, opts);
     
     document.body.appendChild(container);
 
@@ -92,10 +93,26 @@ const PDF = {
 
   /**
    * 対戦表HTML生成
+   * @param {Object} opts - { showGrade, showRank }
    */
-  buildMatchTableHTML(rounds, players) {
+  buildMatchTableHTML(rounds, players, opts = { showGrade: true, showRank: true }) {
+    const { showGrade, showRank } = opts;
     const playerMap = {};
     players.forEach(p => playerMap[p.id] = p);
+
+    const rankStyle = {
+      S: 'background:#ffd700;color:#1a1a2e;padding:1px 6px;border-radius:4px;font-weight:bold;font-size:12px;',
+      A: 'background:#e74c3c;color:#fff;padding:1px 6px;border-radius:4px;font-weight:bold;font-size:12px;',
+      B: 'background:#3498db;color:#fff;padding:1px 6px;border-radius:4px;font-weight:bold;font-size:12px;',
+      C: 'background:#2ecc71;color:#1a1a2e;padding:1px 6px;border-radius:4px;font-weight:bold;font-size:12px;',
+    };
+
+    const playerLabel = (name, grade, rank) => {
+      const parts = [name];
+      if (showGrade) parts.push(`<span style="color:#666;font-size:12px;">${grade}年</span>`);
+      if (showRank)  parts.push(`<span style="${rankStyle[rank] || ''}">${rank}</span>`);
+      return parts.join(' ');
+    };
 
     let html = `
       <div style="text-align:center;margin-bottom:20px;">
@@ -110,9 +127,9 @@ const PDF = {
         <thead>
           <tr>
             <th style="width:5%">No.</th>
-            <th style="width:35%">先手</th>
-            <th style="width:20%">結果</th>
-            <th style="width:35%">後手</th>
+            <th style="width:37%">先手</th>
+            <th style="width:18%">結果</th>
+            <th style="width:37%">後手</th>
           </tr>
         </thead>
         <tbody>`;
@@ -120,15 +137,15 @@ const PDF = {
       round.matches.forEach((match, i) => {
         const resultStr = match.result === 'player1' ? '○ — ●'
           : match.result === 'player2' ? '● — ○'
-          : match.result === 'draw' ? '△ — △'
+          : match.result === 'draw'    ? '△ — △'
           : '— vs —';
 
         html += `
           <tr>
             <td>${i + 1}</td>
-            <td>${match.player1Name}（${match.player1Grade}年）</td>
+            <td>${playerLabel(match.player1Name, match.player1Grade, match.player1Rank)}</td>
             <td style="font-weight:bold;">${resultStr}</td>
-            <td>${match.player2Name}（${match.player2Grade}年）</td>
+            <td>${playerLabel(match.player2Name, match.player2Grade, match.player2Rank)}</td>
           </tr>`;
       });
 
@@ -136,7 +153,8 @@ const PDF = {
 
       if (round.byePlayerId && playerMap[round.byePlayerId]) {
         const byeP = playerMap[round.byePlayerId];
-        html += `<p style="color:#888;font-size:13px;">不戦: ${byeP.name}（${byeP.grade}年）</p>`;
+        const byeMeta = showGrade ? `（${byeP.grade}年）` : '';
+        html += `<p style="color:#888;font-size:13px;">不戦: ${byeP.name}${byeMeta}</p>`;
       }
     });
 
