@@ -1,30 +1,71 @@
 /**
  * storage.js — LocalStorage & Supabase 同期モジュール
  * オフライン時はLocalStorage、オンライン時はSupabaseと同期する
+ * 部屋（roomId）ごとにデータを分離する
  */
 
-const STORAGE_KEY = 'shogi_matching_system';
 const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
 const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
+const ROOM_HISTORY_KEY = 'shogi_room_history';  // 最近使った部屋一覧
+
 const AppStorage = {
   _isSyncing: false,
+  roomId: null,   // 現在の部屋ID（null = 未選択）
 
-  /**
-   * リアルタイム同期の初期化
-   */
+  // ============================================
+  // 部屋管理
+  // ============================================
+
+  /** 部屋IDに対応するローカルストレージキー */
+  getStorageKey() {
+    return `shogi_${this.roomId || '_default'}`;
+  },
+
+  /** ランダムな6文字の部屋コードを生成（見間違えやすい文字を除外） */
+  generateRoomId() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 6 }, () =>
+      chars[Math.floor(Math.random() * chars.length)]
+    ).join('');
+  },
+
+  /** 部屋をセットし、最近の部屋リストに追加 */
+  setRoom(roomId) {
+    this.roomId = roomId.toUpperCase().trim();
+    this._addToRoomHistory(this.roomId);
+    return this.roomId;
+  },
+
+  /** 最近使った部屋リストを取得 */
+  getRoomHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(ROOM_HISTORY_KEY) || '[]');
+    } catch {
+      return [];
+    }
+  },
+
+  _addToRoomHistory(roomId) {
+    const history = this.getRoomHistory().filter(r => r !== roomId);
+    history.unshift(roomId);
+    localStorage.setItem(ROOM_HISTORY_KEY, JSON.stringify(history.slice(0, 5)));
+  },
+
+  // ============================================
+  // リアルタイム同期
+  // ============================================
+
   initRealtime(onUpdateCallback) {
     if (!supabaseClient) return;
 
-    // 初回にSupabaseから最新データを取得してローカルを更新
     this.fetchFromSupabase().then(() => {
       if (onUpdateCallback) onUpdateCallback();
     });
 
-    // データベースの変更を購読（誰かが更新したらローカルを上書きして再描画）
     supabaseClient
-      .channel('public:any')
+      .channel(`room:${this.roomId}`)
       .on('postgres_changes', { event: '*', schema: 'public' }, () => {
         this.fetchFromSupabase().then(() => {
           if (onUpdateCallback) onUpdateCallback();
@@ -33,53 +74,47 @@ const AppStorage = {
       .subscribe();
   },
 
-  /**
-   * Supabaseから全データを取得してLocalStorageを上書きする
-   */
+  // ============================================
+  // Supabase 同期
+  // ============================================
+
   async fetchFromSupabase() {
-    if (!supabaseClient) return;
+    if (!supabaseClient || !this.roomId) return;
     try {
-      this._isSyncing = true; // 上書き時に自分の保存処理が走らないようにする
+      this._isSyncing = true;
 
       const [sQuery, pQuery, rQuery] = await Promise.all([
         supabaseClient.from('settings').select('*').eq('id', 'global').maybeSingle(),
-        supabaseClient.from('players').select('*'),
-        supabaseClient.from('rounds').select('*').order('round_number')
+        supabaseClient.from('players').select('*').eq('room_id', this.roomId),
+        supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number')
       ]);
 
       if (sQuery.error || pQuery.error || rQuery.error) {
         throw new Error('Database fetch error');
       }
 
-      const sRes = sQuery.data;
-      const pRes = pQuery.data;
-      const rRes = rQuery.data;
-
       const data = this.getDefaultData();
 
-      if (sRes) {
-        data.settings.numRounds = sRes.num_rounds;
-        data.settings.byeCountsAsWin = sRes.bye_counts_as_win;
+      if (sQuery.data) {
+        data.settings.numRounds      = sQuery.data.num_rounds;
+        data.settings.byeCountsAsWin = sQuery.data.bye_counts_as_win;
       }
 
-      if (pRes) {
-        data.players = pRes.map(p => ({
-          id: p.id,
-          name: p.name,
-          grade: p.grade,
-          rank: p.rank
+      if (pQuery.data) {
+        data.players = pQuery.data.map(p => ({
+          id: p.id, name: p.name, grade: p.grade, rank: p.rank
         }));
       }
 
-      if (rRes) {
-        data.rounds = rRes.map(r => ({
-          roundNumber: r.round_number,
-          matches: r.matches,
-          byePlayerId: r.bye_player_id
+      if (rQuery.data) {
+        data.rounds = rQuery.data.map(r => ({
+          roundNumber:  r.round_number,
+          matches:      r.matches,
+          byePlayerId:  r.bye_player_id
         }));
       }
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
       this._isSyncing = false;
     } catch (e) {
       console.warn('Supabaseからのデータ取得に失敗しました(オフラインの可能性があります):', e);
@@ -87,64 +122,60 @@ const AppStorage = {
     }
   },
 
-  /**
-   * Supabaseへ全データを同期送信する (バックグラウンド処理)
-   */
   async syncToSupabase(data) {
-    if (!supabaseClient || this._isSyncing) return;
+    if (!supabaseClient || this._isSyncing || !this.roomId) return;
 
     try {
-      // 設定の同期
       await supabaseClient.from('settings').upsert({
         id: 'global',
-        num_rounds: data.settings.numRounds,
+        num_rounds:       data.settings.numRounds,
         bye_counts_as_win: data.settings.byeCountsAsWin
       });
 
-      // 選手の同期
       if (data.players.length > 0) {
-        await supabaseClient.from('players').upsert(data.players.map(p => ({
-          id: p.id,
-          name: p.name,
-          grade: p.grade,
-          rank: p.rank
-        })));
+        await supabaseClient.from('players').upsert(
+          data.players.map(p => ({
+            id: p.id, name: p.name, grade: p.grade, rank: p.rank,
+            room_id: this.roomId
+          }))
+        );
       }
 
-      // ラウンド（対戦表）の同期。配列が空の場合はSupabaseの全ラウンドを削除
       if (data.rounds.length === 0) {
-        await supabaseClient.from('rounds').delete().neq('round_number', -1);
+        await supabaseClient.from('rounds').delete()
+          .eq('room_id', this.roomId);
       } else {
-        await supabaseClient.from('rounds').upsert(data.rounds.map(r => ({
-          round_number: r.roundNumber,
-          matches: r.matches,
-          bye_player_id: r.byePlayerId
-        })));
+        await supabaseClient.from('rounds').upsert(
+          data.rounds.map(r => ({
+            room_id:       this.roomId,
+            round_number:  r.roundNumber,
+            matches:       r.matches,
+            bye_player_id: r.byePlayerId
+          }))
+        );
       }
     } catch (err) {
       console.warn('Supabaseへの同期に失敗:(オフライン)', err);
     }
   },
 
-  /**
-   * 全データを取得
-   */
+  // ============================================
+  // ローカルデータ操作
+  // ============================================
+
   loadAll() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(this.getStorageKey());
       if (!raw) return this.getDefaultData();
       return JSON.parse(raw);
-    } catch (e) {
+    } catch {
       return this.getDefaultData();
     }
   },
 
-  /**
-   * 全データを保存してSupabaseに同期
-   */
   saveAll(data) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
       this.syncToSupabase(data);
     } catch (e) {
       console.error('ローカル保存失敗:', e);
@@ -154,8 +185,11 @@ const AppStorage = {
   getDefaultData() {
     return {
       players: [],
-      rounds: [],
-      settings: { numRounds: 5, byeCountsAsWin: true, gradeAvoidLevel: 2, rankBalanceLevel: 2 }
+      rounds:  [],
+      settings: {
+        numRounds: 5, byeCountsAsWin: true,
+        gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random'
+      }
     };
   },
 
@@ -185,9 +219,9 @@ const AppStorage = {
     }
   },
 
-  getPlayers() {
-    return this.loadAll().players;
-  },
+  getPlayers()  { return this.loadAll().players; },
+  getRounds()   { return this.loadAll().rounds; },
+  getSettings() { return this.loadAll().settings; },
 
   saveRounds(rounds) {
     const data = this.loadAll();
@@ -195,13 +229,9 @@ const AppStorage = {
     this.saveAll(data);
   },
 
-  getRounds() {
-    return this.loadAll().rounds;
-  },
-
   updateMatchResult(roundIndex, matchIndex, result) {
     const data = this.loadAll();
-    if (data.rounds[roundIndex] && data.rounds[roundIndex].matches[matchIndex]) {
+    if (data.rounds[roundIndex]?.matches[matchIndex]) {
       data.rounds[roundIndex].matches[matchIndex].result = result;
       this.saveAll(data);
     }
@@ -213,15 +243,11 @@ const AppStorage = {
     this.saveAll(data);
   },
 
-  getSettings() {
-    return this.loadAll().settings;
-  },
-
   resetAll() {
-    localStorage.removeItem(STORAGE_KEY);
-    if (supabaseClient) {
-      supabaseClient.from('players').delete().neq('id', 'dummy').then();
-      supabaseClient.from('rounds').delete().neq('round_number', -1).then();
+    localStorage.removeItem(this.getStorageKey());
+    if (supabaseClient && this.roomId) {
+      supabaseClient.from('players').delete().eq('room_id', this.roomId).then();
+      supabaseClient.from('rounds').delete().eq('room_id', this.roomId).then();
     }
   },
 
@@ -233,9 +259,7 @@ const AppStorage = {
       .map(b => b.toString(16).padStart(2, '0'))
       .join('');
     const { error } = await supabaseClient
-      .from('settings')
-      .update({ admin_password_hash: hash })
-      .eq('id', 'global');
+      .from('settings').update({ admin_password_hash: hash }).eq('id', 'global');
     if (error) throw error;
   },
 

@@ -1248,3 +1248,222 @@ body::before {
   color: var(--text-muted);
   font-weight: 400;
 }
+
+/* --- Room Selector Overlay --- */
+#room-selector-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+
+  background-image:
+    radial-gradient(circle at 20% 50%, rgba(230, 168, 23, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(167, 139, 250, 0.05) 0%, transparent 50%);
+}
+
+#room-selector-overlay.hidden {
+  display: none;
+}
+
+.room-selector-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 40px 36px;
+  width: 100%;
+  max-width: 440px;
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(230, 168, 23, 0.05);
+  text-align: center;
+}
+
+.room-selector-logo {
+  font-size: 52px;
+  margin-bottom: 10px;
+  filter: drop-shadow(0 4px 12px rgba(230, 168, 23, 0.3));
+}
+
+.room-selector-title {
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--amber-light), var(--gold), var(--amber));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 6px;
+}
+
+.room-selector-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+  line-height: 1.5;
+}
+
+.room-selector-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.room-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+}
+
+.room-divider {
+  position: relative;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
+
+.room-divider::before,
+.room-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 42%;
+  height: 1px;
+  background: var(--border);
+}
+
+.room-divider::before { left: 0; }
+.room-divider::after  { right: 0; }
+
+.room-join-group {
+  display: flex;
+  gap: 8px;
+}
+
+.room-code-input {
+  flex: 1;
+  text-align: center;
+  letter-spacing: 0.15em;
+  font-size: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* History */
+.room-history {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.room-history.hidden { display: none; }
+
+.room-history-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.room-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.room-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-fast);
+  font-family: inherit;
+  color: var(--text-primary);
+}
+
+.room-history-item:hover {
+  border-color: var(--amber);
+  background: var(--amber-glow);
+  color: var(--amber-light);
+}
+
+.room-history-code {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+.room-history-arrow {
+  font-size: 14px;
+  opacity: 0.5;
+}
+
+/* --- Room Info Bar (header) --- */
+.room-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 16px;
+  background: var(--amber-glow);
+  border: 1px solid rgba(230, 168, 23, 0.25);
+  border-radius: 20px;
+  display: inline-flex;
+}
+
+.room-info-bar.hidden { display: none; }
+
+.room-info-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.room-code-display {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--amber-light);
+}
+
+.btn-change-room {
+  background: none;
+  border: 1px solid rgba(230, 168, 23, 0.3);
+  border-radius: 4px;
+  color: var(--amber);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 8px;
+  transition: var(--transition-fast);
+}
+
+.btn-change-room:hover {
+  background: var(--amber-glow);
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+
+/* Shake animation for invalid input */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.shake {
+  animation: shake 0.4s ease;
+}
+
+/* hidden utility */
+.hidden { display: none !important; }

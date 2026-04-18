@@ -94,6 +94,149 @@ const Matching = {
   },
 
   /**
+   * 既存ラウンドから対戦・ランク履歴を再構築
+   */
+  buildHistoryFromRounds(players, rounds) {
+    const matchHistory = new Set();
+    const rankHistory  = {};
+    const byeCounts    = {};
+    players.forEach(p => {
+      rankHistory[p.id] = { S: 0, A: 0, B: 0, C: 0 };
+      byeCounts[p.id]   = 0;
+    });
+    rounds.forEach(round => {
+      round.matches.forEach(match => {
+        matchHistory.add(this.makeMatchKey(match.player1Id, match.player2Id));
+        const p1 = players.find(p => p.id === match.player1Id);
+        const p2 = players.find(p => p.id === match.player2Id);
+        if (p1 && p2) {
+          rankHistory[p1.id][p2.rank]++;
+          rankHistory[p2.id][p1.rank]++;
+        }
+      });
+      if (round.byePlayerId) byeCounts[round.byePlayerId]++;
+    });
+    return { matchHistory, rankHistory, byeCounts };
+  },
+
+  /**
+   * スイスドロー方式：現在の成績に基づいて次の1ラウンドを生成
+   */
+  generateNextSwissRound(players, existingRounds, options = {}) {
+    if (players.length < 2) {
+      return { error: 'プレイヤーが2人以上必要です。' };
+    }
+
+    const gradeLevel   = options.gradeAvoidLevel  ?? 2;
+    const rankLevel    = options.rankBalanceLevel ?? 2;
+    const gradePenalty = this.GRADE_PENALTIES[gradeLevel] ?? 100;
+    const rankWeight   = this.RANK_WEIGHTS[rankLevel]     ?? 15;
+    const byeAsWin     = options.byeCountsAsWin ?? true;
+
+    const { matchHistory, rankHistory, byeCounts } = this.buildHistoryFromRounds(players, existingRounds);
+    const roundIndex = existingRounds.length;
+
+    // 現在の得点マップを構築
+    const pointsMap = {};
+    players.forEach(p => { pointsMap[p.id] = 0; });
+    if (existingRounds.length > 0) {
+      this.calculateStandings(players, existingRounds, byeAsWin)
+        .forEach(s => { pointsMap[s.id] = s.points; });
+    }
+
+    // 複数試行で最良ペアリングを選択
+    let bestPairs = null;
+    let bestByeId = null;
+    let bestScore = Infinity;
+
+    for (let trial = 0; trial < 80; trial++) {
+      const res = this._trySwissPairing(
+        players, matchHistory, rankHistory, byeCounts, pointsMap, gradePenalty, rankWeight
+      );
+      if (!res) continue;
+      const score = this.evaluatePairing(res.pairs, players, rankHistory, gradePenalty, rankWeight);
+      if (score < bestScore) {
+        bestScore  = score;
+        bestPairs  = res.pairs;
+        bestByeId  = res.byePlayerId;
+      }
+    }
+
+    if (!bestPairs) {
+      return { error: 'スイスドローの生成に失敗しました。' };
+    }
+
+    return {
+      round: {
+        roundNumber: roundIndex + 1,
+        matches: bestPairs.map(([p1, p2]) => ({
+          player1Id:    p1.id,   player2Id:    p2.id,
+          player1Name:  p1.name, player2Name:  p2.name,
+          player1Rank:  p1.rank, player2Rank:  p2.rank,
+          player1Grade: p1.grade,player2Grade: p2.grade,
+          result: null
+        })),
+        byePlayerId: bestByeId
+      }
+    };
+  },
+
+  _trySwissPairing(players, matchHistory, rankHistory, byeCounts, pointsMap, gradePenalty, rankWeight) {
+    // 得点降順にソート（同点はランダムでシャッフル）
+    const sorted = [...players].sort((a, b) => {
+      const diff = (pointsMap[b.id] ?? 0) - (pointsMap[a.id] ?? 0);
+      return diff !== 0 ? diff : (Math.random() - 0.5);
+    });
+
+    let active    = sorted;
+    let byePlayerId = null;
+
+    if (active.length % 2 !== 0) {
+      // 最も得点が低くBYE回数が少ない選手にBYEを割り当て
+      const minBye = Math.min(...active.map(p => byeCounts[p.id] ?? 0));
+      const minPts = Math.min(...active.map(p => pointsMap[p.id] ?? 0));
+      const cands  = active.filter(p =>
+        (pointsMap[p.id] ?? 0) === minPts && (byeCounts[p.id] ?? 0) === minBye
+      );
+      const byeP   = cands[Math.floor(Math.random() * cands.length)];
+      byePlayerId  = byeP.id;
+      active       = active.filter(p => p.id !== byePlayerId);
+    }
+
+    const used  = new Set();
+    const pairs = [];
+
+    for (let i = 0; i < active.length; i++) {
+      if (used.has(active[i].id)) continue;
+
+      let bestJ    = -1;
+      let bestScore = Infinity;
+
+      for (let j = i + 1; j < active.length; j++) {
+        if (used.has(active[j].id)) continue;
+
+        const key        = this.makeMatchKey(active[i].id, active[j].id);
+        const rematch    = matchHistory.has(key) ? 10000 : 0;
+        const standingGap = (j - i) * 25;          // 順位差ペナルティ（スイスの核心）
+        const ptsDiff    = Math.abs((pointsMap[active[i].id] ?? 0) - (pointsMap[active[j].id] ?? 0)) * 20;
+        const gradeP     = active[i].grade === active[j].grade ? gradePenalty : 0;
+        const rankP      = ((rankHistory[active[i].id]?.[active[j].rank] ?? 0) +
+                            (rankHistory[active[j].id]?.[active[i].rank] ?? 0)) * rankWeight;
+
+        const score = rematch + standingGap + ptsDiff + gradeP + rankP + Math.random() * 5;
+        if (score < bestScore) { bestScore = score; bestJ = j; }
+      }
+
+      if (bestJ === -1) return null;
+      used.add(active[i].id);
+      used.add(active[bestJ].id);
+      pairs.push([active[i], active[bestJ]]);
+    }
+
+    return { pairs, byePlayerId };
+  },
+
+  /**
    * 単一ラウンドの対戦組み合わせを生成
    */
   generateSingleRound(players, matchHistory, rankHistory, byeCounts, roundIndex, gradePenalty = 100, rankWeight = 15) {

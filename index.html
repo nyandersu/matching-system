@@ -20,12 +20,54 @@
 </head>
 <body>
 
-<div class="app-container">
+<!-- 部屋選択オーバーレイ -->
+<div id="room-selector-overlay" class="hidden">
+  <div class="room-selector-card">
+    <div class="room-selector-logo">♛</div>
+    <h1 class="room-selector-title">将棋部内戦マッチング</h1>
+    <p class="room-selector-subtitle">部屋コードで参加者とデータを共有できます</p>
+
+    <div class="room-selector-actions">
+      <button id="room-create-btn" class="btn btn-primary room-btn">
+        ＋ 新しい部屋を作成
+      </button>
+
+      <div class="room-divider"><span>または</span></div>
+
+      <div class="room-join-group">
+        <input
+          type="text"
+          id="room-code-input"
+          class="form-input room-code-input"
+          placeholder="部屋コードを入力（例: AB3K9M）"
+          maxlength="6"
+          autocapitalize="characters"
+          spellcheck="false"
+        >
+        <button id="room-join-btn" class="btn btn-secondary room-btn">
+          参加
+        </button>
+      </div>
+    </div>
+
+    <div id="room-history-section" class="room-history hidden">
+      <p class="room-history-label">最近使った部屋</p>
+      <div id="room-history-list" class="room-history-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="app-main" class="app-container">
   <!-- Header -->
   <header class="app-header">
     <span class="app-logo">♛</span>
     <h1 class="app-title">将棋部内戦マッチングシステム</h1>
     <p class="app-subtitle">団体戦メンバー選考用 — 対戦組み合わせ自動生成 &amp; 成績管理</p>
+    <div id="room-info-bar" class="room-info-bar hidden">
+      <span class="room-info-label">部屋:</span>
+      <span id="room-code-display" class="room-code-display"></span>
+      <button id="change-room-btn" class="btn-change-room" title="部屋を変更">変更</button>
+    </div>
   </header>
 
   <!-- Tab Navigation -->
@@ -111,6 +153,13 @@
     <div class="card">
       <h2 class="card-title"><span class="icon">⚙</span> マッチング設定</h2>
       <div class="matching-controls">
+        <div class="form-group">
+          <label class="form-label" for="matching-format">方式</label>
+          <select id="matching-format" class="form-select">
+            <option value="random">ランダム方式（全ラウンド一括生成）</option>
+            <option value="swiss">スイスドロー（成績順に1ラウンドずつ生成）</option>
+          </select>
+        </div>
         <div class="form-group">
           <label class="form-label" for="num-rounds">ラウンド数</label>
           <select id="num-rounds" class="form-select">
