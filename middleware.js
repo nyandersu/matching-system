@@ -1,68 +1,9 @@
-const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
-const VALID_USER = 'shogi';
+/**
+ * middleware.js
+ * 認証はアプリ側（ログイン画面）で管理するため、ミドルウェアはパススルー
+ */
 
-// 認証不要な静的ファイル（PWA・ブラウザが自動リクエストするもの）
-const PUBLIC_PATHS = [
-  '/service-worker.js',
-  '/manifest.json',
-  '/favicon.ico',
-  '/apple-touch-icon.png',
-  '/apple-touch-icon-precomposed.png',
-];
-
-async function sha256hex(text) {
-  const encoded = new TextEncoder().encode(text);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-export default async function middleware(request) {
-  const { pathname } = new URL(request.url);
-
-  // 静的ファイルは認証不要
-  if (PUBLIC_PATHS.includes(pathname)) {
-    return;
-  }
-
-  const authorization = request.headers.get('authorization');
-
-  if (authorization) {
-    try {
-      const basicAuth = authorization.split(' ')[1];
-      if (basicAuth) {
-        const [user, password] = atob(basicAuth).split(':');
-
-        if (user === VALID_USER) {
-          const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/settings?id=eq.global&select=admin_password_hash`,
-            {
-              headers: {
-                'apikey': SUPABASE_KEY,
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-              },
-            }
-          );
-          const rows = await res.json();
-          if (rows.length > 0 && rows[0].admin_password_hash) {
-            const inputHash = await sha256hex(password);
-            if (inputHash === rows[0].admin_password_hash) {
-              return; // 認証成功
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Auth check failed:', e);
-    }
-  }
-
-  return new Response('Auth required', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Shogi Admin"',
-    },
-  });
+// 静的ファイルはそのまま通す
+export default function middleware(_request) {
+  return; // 全リクエストを通過させる
 }
