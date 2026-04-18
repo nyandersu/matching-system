@@ -15,7 +15,10 @@ const UI = {
     this.bindMatchingEvents();
     this.bindSettingsEvents();
     this.bindPasswordChangeEvents();
-    
+
+    // 部屋バッジを表示
+    this._showRoomBadge();
+
     // 初回のローカル描画
     this.renderAll();
 
@@ -25,6 +28,92 @@ const UI = {
     });
 
     this.showTab('players');
+  },
+
+  // ============================================
+  // 部屋選択
+  // ============================================
+
+  showRoomSelector() {
+    // メインコンテンツを隠してオーバーレイを表示
+    document.getElementById('app-main').classList.add('hidden');
+    const overlay = document.getElementById('room-selector-overlay');
+    overlay.classList.remove('hidden');
+
+    // 最近使った部屋を表示
+    const history = AppStorage.getRoomHistory();
+    if (history.length > 0) {
+      const section = document.getElementById('room-history-section');
+      const list    = document.getElementById('room-history-list');
+      section.classList.remove('hidden');
+      list.innerHTML = history.map(r => `
+        <button class="room-history-item" data-room="${r}">
+          <span class="room-history-code">${r}</span>
+          <span class="room-history-arrow">→</span>
+        </button>
+      `).join('');
+      list.querySelectorAll('.room-history-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          this._enterRoom(btn.dataset.room);
+        });
+      });
+    }
+
+    // 新規作成ボタン
+    document.getElementById('room-create-btn').addEventListener('click', () => {
+      const newId = AppStorage.generateRoomId();
+      this._enterRoom(newId);
+    });
+
+    // 参加ボタン
+    document.getElementById('room-join-btn').addEventListener('click', () => {
+      this._joinRoomFromInput();
+    });
+
+    // Enterキーでも参加
+    document.getElementById('room-code-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._joinRoomFromInput();
+    });
+
+    // 自動大文字変換
+    document.getElementById('room-code-input').addEventListener('input', (e) => {
+      const pos = e.target.selectionStart;
+      e.target.value = e.target.value.toUpperCase();
+      e.target.setSelectionRange(pos, pos);
+    });
+  },
+
+  _joinRoomFromInput() {
+    const code = document.getElementById('room-code-input').value.trim().toUpperCase();
+    if (code.length < 4) {
+      // 軽いシェイクアニメーション
+      const input = document.getElementById('room-code-input');
+      input.classList.add('shake');
+      setTimeout(() => input.classList.remove('shake'), 400);
+      return;
+    }
+    this._enterRoom(code);
+  },
+
+  _enterRoom(roomId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('room', roomId.toUpperCase());
+    window.location.href = url.toString();
+  },
+
+  _showRoomBadge() {
+    const bar = document.getElementById('room-info-bar');
+    const display = document.getElementById('room-code-display');
+    if (bar && display && AppStorage.roomId) {
+      display.textContent = AppStorage.roomId;
+      bar.classList.remove('hidden');
+
+      document.getElementById('change-room-btn').addEventListener('click', () => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('room');
+        window.location.href = url.toString();
+      });
+    }
   },
 
   renderAll() {
