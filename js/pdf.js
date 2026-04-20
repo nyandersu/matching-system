@@ -9,16 +9,15 @@ const PDF = {
    */
   async exportMatchTable(rounds, players, opts = { showGrade: true, showRank: true }) {
     const container = document.createElement('div');
-    container.className = 'pdf-export';
     container.innerHTML = this.buildMatchTableHTML(rounds, players, opts);
-    
+    this._prepareContainer(container);
     document.body.appendChild(container);
 
     const opt = {
       margin: 10,
       filename: '対戦表.pdf',
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
@@ -26,7 +25,6 @@ const PDF = {
       await html2pdf().set(opt).from(container).save();
     } catch (e) {
       console.error('PDF生成エラー:', e);
-      // フォールバック: 印刷ダイアログ
       this.printContent(container.innerHTML);
     } finally {
       document.body.removeChild(container);
@@ -38,16 +36,15 @@ const PDF = {
    */
   async exportStandings(standings) {
     const container = document.createElement('div');
-    container.className = 'pdf-export';
     container.innerHTML = this.buildStandingsHTML(standings);
-
+    this._prepareContainer(container);
     document.body.appendChild(container);
 
     const opt = {
       margin: 10,
       filename: '成績表.pdf',
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
@@ -59,6 +56,23 @@ const PDF = {
     } finally {
       document.body.removeChild(container);
     }
+  },
+
+  /** html2canvasが確実にキャプチャできるよう要素をviewport内に固定配置 */
+  _prepareContainer(el) {
+    Object.assign(el.style, {
+      position: 'fixed',
+      top: '0',
+      left: '0',
+      opacity: '0',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      background: '#fff',
+      color: '#1a1a2e',
+      padding: '20px',
+      width: '700px',
+      fontFamily: 'sans-serif',
+    });
   },
 
   /**
