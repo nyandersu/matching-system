@@ -894,6 +894,79 @@ body::before {
   font-size: 16px;
 }
 
+/* --- Standings Header Actions --- */
+.standings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.btn-ghost.toggle-active {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* --- Pt算出方法モーダル --- */
+.pt-info-card {
+  max-width: 340px;
+  padding: 28px 24px;
+}
+
+.pt-info-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  color: var(--text-primary);
+}
+
+.pt-info-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 14px;
+}
+
+.pt-info-table tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.pt-info-table td {
+  padding: 9px 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.pt-info-table .pt-val {
+  text-align: right;
+  font-weight: 700;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.pt-info-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* --- Toast Notifications --- */
 #toast-container {
   position: fixed;

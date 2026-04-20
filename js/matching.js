@@ -475,26 +475,25 @@ const Matching = {
         }
       });
 
-      // BYE処理
+      // BYE処理（不戦勝：winsには加算しない、byes と points のみ加算）
       if (round.byePlayerId && stats[round.byePlayerId]) {
         stats[round.byePlayerId].byes++;
-        if (byeCountsAsWin) {
-          stats[round.byePlayerId].wins++;
-          stats[round.byePlayerId].points += 2;
-        }
+        stats[round.byePlayerId].points += 2;
       }
     });
 
-    // 勝率計算
+    // 勝率計算（不戦勝は対局数に含めない）
     Object.values(stats).forEach(s => {
       const totalGames = s.wins + s.losses + s.draws;
       s.winRate = totalGames > 0 ? (s.wins / totalGames * 100) : 0;
     });
 
-    // ソート: ポイント降順 → 勝数降順 → 勝率降順
+    // ソート: ポイント降順 → (勝+不戦勝)降順 → 勝率降順
     const sorted = Object.values(stats).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
-      if (b.wins !== a.wins) return b.wins - a.wins;
+      const totalA = a.wins + a.byes;
+      const totalB = b.wins + b.byes;
+      if (totalB !== totalA) return totalB - totalA;
       return b.winRate - a.winRate;
     });
 
@@ -504,9 +503,9 @@ const Matching = {
         s.position = 1;
       } else {
         const prev = sorted[i - 1];
-        s.position = (s.points === prev.points && s.wins === prev.wins)
-          ? prev.position
-          : i + 1;
+        const samePoints = s.points === prev.points;
+        const sameWins   = (s.wins + s.byes) === (prev.wins + prev.byes);
+        s.position = (samePoints && sameWins) ? prev.position : i + 1;
       }
     });
 
