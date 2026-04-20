@@ -181,7 +181,9 @@ const AppStorage = {
         throw new Error('Database fetch error');
       }
 
-      const data = this.getDefaultData();
+      // 既存のローカルデータをベースにして Supabase のデータで上書き
+      // （settings の Supabase 非管理フィールドを保持するため）
+      const data = this.loadAll();
 
       if (sQuery.data) {
         data.settings.numRounds = sQuery.data.num_rounds;
