@@ -1648,5 +1648,150 @@ body::before {
   animation: shake 0.4s ease;
 }
 
+/* --- Manual Edit Mode --- */
+
+/* 編集モードバー（ヒント + 完了/キャンセルボタン） */
+.edit-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  background: rgba(230, 168, 23, 0.08);
+  border: 1px solid rgba(230, 168, 23, 0.3);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.edit-mode-hint {
+  font-size: 12px;
+  color: var(--amber);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.edit-mode-hint-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.edit-mode-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+/* 編集モード中のマッチカード */
+.editing-card {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid rgba(230, 168, 23, 0.2);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+/* 選手ボタン（クリックで選択） */
+.edit-player-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 8px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+  min-width: 0;
+}
+
+.edit-player-btn:hover {
+  border-color: var(--amber);
+  background: var(--bg-card-hover);
+}
+
+/* 選択中の選手 */
+.edit-player-btn.edit-selected {
+  border-color: var(--amber-light);
+  background: var(--amber-glow);
+  box-shadow: 0 0 0 3px rgba(230, 168, 23, 0.2);
+  transform: scale(1.02);
+}
+
+.edit-player-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.edit-player-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 先後交代ボタン */
+.swap-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  margin: 0 6px;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.swap-btn:hover {
+  background: var(--amber-glow);
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+
+/* 手動編集ボタン（display-opts-bar 内） */
+.btn-edit-mode {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-edit-mode:hover {
+  border-color: var(--amber);
+  color: var(--amber-light);
+  background: var(--amber-glow);
+}
+
 /* hidden utility */
 .hidden { display: none !important; }

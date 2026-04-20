@@ -7,6 +7,11 @@ const UI = {
   editingPlayerId: null,
   displayOpts: { showGrade: true, showRank: true },
 
+  // 手動編集モード
+  editMode: false,
+  editSelected: null,   // { ri, mi, side } — 選択中の選手
+  _editSnapshot: null,  // キャンセル用スナップショット
+
   /**
    * 初期化
    */
@@ -434,6 +439,7 @@ const UI = {
 
   bindMatchingEvents() {
     document.getElementById('generate-btn').addEventListener('click', () => {
+      if (this.editMode) this.exitEditMode(true);
       this.generateMatching();
     });
 
@@ -455,10 +461,29 @@ const UI = {
 
     document.getElementById('clear-rounds-btn').addEventListener('click', () => {
       if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。')) {
+        if (this.editMode) this.exitEditMode(true);
         AppStorage.saveRounds([]);
         this.renderMatchingResult();
         this.showToast('対戦表をクリアしました', 'info');
       }
+    });
+
+    // 手動編集モード
+    document.getElementById('edit-matches-btn').addEventListener('click', () => {
+      const rounds = AppStorage.getRounds();
+      if (rounds.length === 0) {
+        this.showToast('先に対戦表を生成してください', 'error');
+        return;
+      }
+      this.enterEditMode();
+    });
+    document.getElementById('edit-done-btn').addEventListener('click', () => {
+      this.exitEditMode(false);
+      this.showToast('対戦表を保存しました', 'success');
+    });
+    document.getElementById('edit-cancel-btn').addEventListener('click', () => {
+      this.exitEditMode(true);
+      this.showToast('編集をキャンセルしました', 'info');
     });
 
     document.getElementById('export-matches-btn').addEventListener('click', () => {
@@ -592,6 +617,105 @@ const UI = {
     }
   },
 
+  // ============================================
+  // 手動編集モード
+  // ============================================
+
+  enterEditMode() {
+    this.editMode = true;
+    this.editSelected = null;
+    this._editSnapshot = JSON.parse(JSON.stringify(AppStorage.getRounds()));
+    document.getElementById('edit-matches-btn').classList.add('hidden');
+    document.getElementById('edit-mode-bar').classList.remove('hidden');
+    this.renderMatchingResult();
+  },
+
+  exitEditMode(cancel = false) {
+    if (cancel && this._editSnapshot) {
+      AppStorage.saveRounds(this._editSnapshot);
+    }
+    this.editMode = false;
+    this.editSelected = null;
+    this._editSnapshot = null;
+    document.getElementById('edit-matches-btn').classList.remove('hidden');
+    document.getElementById('edit-mode-bar').classList.add('hidden');
+    this.renderMatchingResult();
+  },
+
+  /** 先後交代（同一対局内でplayer1↔player2を入れ替え） */
+  swapSenteGote(ri, mi) {
+    const rounds = AppStorage.getRounds();
+    const m = rounds[ri].matches[mi];
+    const tmp = {
+      id: m.player1Id, name: m.player1Name,
+      grade: m.player1Grade, rank: m.player1Rank
+    };
+    m.player1Id    = m.player2Id;    m.player2Id    = tmp.id;
+    m.player1Name  = m.player2Name;  m.player2Name  = tmp.name;
+    m.player1Grade = m.player2Grade; m.player2Grade = tmp.grade;
+    m.player1Rank  = m.player2Rank;  m.player2Rank  = tmp.rank;
+    // 結果も反転
+    if (m.result === 'player1') m.result = 'player2';
+    else if (m.result === 'player2') m.result = 'player1';
+    AppStorage.saveRounds(rounds);
+    this.renderMatchingResult();
+  },
+
+  /** 選手をタップして選択 → 2人目タップで入れ替え */
+  selectPlayerForSwap(ri, mi, side) {
+    const sel = this.editSelected;
+    // 同じ選手を再タップ → 選択解除
+    if (sel && sel.ri === ri && sel.mi === mi && sel.side === side) {
+      this.editSelected = null;
+      this.renderMatchingResult();
+      return;
+    }
+    // 1人目の選択
+    if (!sel) {
+      this.editSelected = { ri, mi, side };
+      this.renderMatchingResult();
+      return;
+    }
+    // 2人目の選択 → 入れ替え実行
+    this._swapPlayers(sel.ri, sel.mi, sel.side, ri, mi, side);
+    this.editSelected = null;
+  },
+
+  _swapPlayers(ri1, mi1, side1, ri2, mi2, side2) {
+    const rounds = AppStorage.getRounds();
+    const m1 = rounds[ri1].matches[mi1];
+    const m2 = rounds[ri2].matches[mi2];
+
+    const get = (m, s) => ({
+      id:    m[s + 'Id'],
+      name:  m[s + 'Name'],
+      grade: m[s + 'Grade'],
+      rank:  m[s + 'Rank'],
+    });
+    const set = (m, s, p) => {
+      m[s + 'Id']    = p.id;
+      m[s + 'Name']  = p.name;
+      m[s + 'Grade'] = p.grade;
+      m[s + 'Rank']  = p.rank;
+    };
+
+    const p1 = get(m1, side1);
+    const p2 = get(m2, side2);
+    set(m1, side1, p2);
+    set(m2, side2, p1);
+
+    // 入れ替えた対局の結果をリセット
+    let cleared = false;
+    if (m1.result) { m1.result = null; cleared = true; }
+    if (!(ri1 === ri2 && mi1 === mi2) && m2.result) { m2.result = null; cleared = true; }
+
+    AppStorage.saveRounds(rounds);
+    if (cleared) {
+      this.showToast('組み合わせを変更したため対局結果をリセットしました', 'info');
+    }
+    this.renderMatchingResult();
+  },
+
   renderMatchingResult() {
     const rounds = AppStorage.getRounds();
     const players = AppStorage.getPlayers();
@@ -610,7 +734,7 @@ const UI = {
     }
 
     let html = '';
-    rounds.forEach(round => {
+    rounds.forEach((round, ri) => {
       html += `
         <div class="round-card">
           <h3 class="round-title">
@@ -619,8 +743,32 @@ const UI = {
           </h3>
           <div class="match-list">
             ${round.matches.map((match, i) => {
-              const resultClass = match.result ? 'has-result' : '';
               const { showGrade, showRank } = this.displayOpts;
+
+              if (this.editMode) {
+                // ---- 編集モード ----
+                const sel = this.editSelected;
+                const isSel1 = sel && sel.ri === ri && sel.mi === i && sel.side === 'player1';
+                const isSel2 = sel && sel.ri === ri && sel.mi === i && sel.side === 'player2';
+                const playerBtn = (side, name, grade, rank) => `
+                  <button type="button"
+                    class="edit-player-btn${(side === 'player1' ? isSel1 : isSel2) ? ' edit-selected' : ''}"
+                    onclick="UI.selectPlayerForSwap(${ri}, ${i}, '${side}')">
+                    <span class="edit-player-name">${this.escapeHtml(name)}</span>
+                    ${showGrade ? `<span class="edit-player-meta">${grade}年</span>` : ''}
+                    ${showRank  ? `<span class="rank-badge rank-${rank}">${rank}</span>` : ''}
+                  </button>`;
+                return `
+                  <div class="match-card editing-card">
+                    <div class="match-number">${i + 1}</div>
+                    ${playerBtn('player1', match.player1Name, match.player1Grade, match.player1Rank)}
+                    <button type="button" class="swap-btn" onclick="UI.swapSenteGote(${ri}, ${i})" title="先後交代">⇄</button>
+                    ${playerBtn('player2', match.player2Name, match.player2Grade, match.player2Rank)}
+                  </div>`;
+              }
+
+              // ---- 通常表示 ----
+              const resultClass = match.result ? 'has-result' : '';
               return `
                 <div class="match-card ${resultClass}">
                   <div class="match-number">${i + 1}</div>

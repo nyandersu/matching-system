@@ -268,10 +268,21 @@
         </button>
       </div>
     </div>
+    <div class="edit-mode-bar hidden" id="edit-mode-bar">
+      <span class="edit-mode-hint">
+        <span class="edit-mode-hint-icon">✏</span>
+        選手名をタップして選択 → 別の選手をタップで入れ替え　／　<strong>⇄</strong> で先後交代
+      </span>
+      <div class="edit-mode-actions">
+        <button class="btn btn-secondary btn-sm" id="edit-cancel-btn">✕ キャンセル</button>
+        <button class="btn btn-primary btn-sm"   id="edit-done-btn">✓ 編集完了</button>
+      </div>
+    </div>
     <div class="display-opts-bar" id="matching-display-opts">
       <span class="display-opts-label">表示項目</span>
       <button type="button" class="display-chip active" data-key="grade">学年</button>
       <button type="button" class="display-chip active" data-key="rank">ランク</button>
+      <button type="button" class="btn-edit-mode" id="edit-matches-btn">✏ 手動編集</button>
     </div>
     <div id="matching-result"></div>
   </div>
