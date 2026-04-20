@@ -275,7 +275,8 @@ const AppStorage = {
       rounds:  [],
       settings: {
         numRounds: 5,
-        gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random'
+        gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random',
+        assignSenteGote: true
       }
     };
   },

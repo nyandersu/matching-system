@@ -444,8 +444,8 @@ const UI = {
       this.generateMatching();
     });
 
-    // セグメントコントロール（同学年回避・ランク均等化）
-    ['grade-avoid', 'rank-balance'].forEach(id => {
+    // セグメントコントロール（先後割り当て・同学年回避・ランク均等化）
+    ['sente-gote', 'grade-avoid', 'rank-balance'].forEach(id => {
       document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll(`#${id}-segment .wseg-btn`)
@@ -500,10 +500,11 @@ const UI = {
 
   generateMatching() {
     const players        = AppStorage.getPlayers();
-    const numRounds      = parseInt(document.getElementById('num-rounds').value);
+    const numRounds        = parseInt(document.getElementById('num-rounds').value);
     const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
     const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
     const matchingFormat   = document.getElementById('matching-format').value;
+    const assignSenteGote  = parseInt(document.getElementById('assign-sente-gote').value) === 1;
 
     if (players.length < 2) {
       this.showToast('最低2人の選手が必要です', 'error');
@@ -516,7 +517,7 @@ const UI = {
 
     setTimeout(() => {
       const settings = AppStorage.getSettings();
-      const opts = { gradeAvoidLevel, rankBalanceLevel, byeCountsAsWin: settings.byeCountsAsWin };
+      const opts = { gradeAvoidLevel, rankBalanceLevel, assignSenteGote };
 
       if (matchingFormat === 'swiss') {
         this._generateSwissRound(players, numRounds, opts);
@@ -524,7 +525,7 @@ const UI = {
         this._generateAllRoundsRandom(players, numRounds, opts);
       }
 
-      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel, matchingFormat });
+      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel, matchingFormat, assignSenteGote });
       this.renderMatchingResult();
     }, 100);
   },
@@ -769,11 +770,15 @@ const UI = {
               }
 
               // ---- 通常表示 ----
-              const resultClass = match.result ? 'has-result' : '';
+              const resultClass   = match.result ? 'has-result' : '';
+              const showSenteGote = parseInt(document.getElementById('assign-sente-gote')?.value ?? '1') === 1;
+              const p1label = showSenteGote ? '<span class="sente-label">先</span>' : '';
+              const p2label = showSenteGote ? '<span class="gote-label">後</span>'  : '';
               return `
                 <div class="match-card ${resultClass}">
                   <div class="match-number">${i + 1}</div>
                   <div class="match-player player1 ${match.result === 'player1' ? 'winner' : match.result === 'player2' ? 'loser' : ''}">
+                    ${p1label}
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player1Name)}</span>
                       ${showGrade ? `<span class="player-grade-text">${match.player1Grade}年</span>` : ''}
@@ -782,6 +787,7 @@ const UI = {
                   </div>
                   <div class="match-vs">VS</div>
                   <div class="match-player player2 ${match.result === 'player2' ? 'winner' : match.result === 'player1' ? 'loser' : ''}">
+                    ${p2label}
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player2Name)}</span>
                       ${showGrade ? `<span class="player-grade-text">${match.player2Grade}年</span>` : ''}
@@ -1207,9 +1213,11 @@ const UI = {
     document.getElementById('num-rounds').value       = settings.numRounds || 5;
     document.getElementById('matching-format').value  = settings.matchingFormat || 'random';
 
-    const gradeLevel = settings.gradeAvoidLevel ?? 2;
-    const rankLevel  = settings.rankBalanceLevel ?? 2;
-    this._setSegmentValue('grade-avoid', gradeLevel);
+    const gradeLevel      = settings.gradeAvoidLevel  ?? 2;
+    const rankLevel       = settings.rankBalanceLevel ?? 2;
+    const assignSenteGote = settings.assignSenteGote  ?? true;
+    this._setSegmentValue('sente-gote',   assignSenteGote ? 1 : 0);
+    this._setSegmentValue('grade-avoid',  gradeLevel);
     this._setSegmentValue('rank-balance', rankLevel);
     this.updateGenerateButton();
   },

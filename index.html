@@ -236,6 +236,14 @@
           </select>
         </div>
         <div class="form-group weight-group">
+          <label class="form-label">先手・後手の割り当て</label>
+          <div class="weight-segment" id="sente-gote-segment">
+            <button type="button" class="wseg-btn wseg-active" data-value="1">指定あり（先後均等化）</button>
+            <button type="button" class="wseg-btn" data-value="0">指定なし</button>
+          </div>
+          <input type="hidden" id="assign-sente-gote" value="1">
+        </div>
+        <div class="form-group weight-group">
           <label class="form-label">同学年対決の回避</label>
           <div class="weight-segment" id="grade-avoid-segment">
             <button type="button" class="wseg-btn" data-value="0">無効</button>

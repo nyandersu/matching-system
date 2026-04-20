@@ -17,11 +17,12 @@ const Matching = {
    * @returns {Array|null} ラウンド配列 or null（生成不可）
    */
   generateAllRounds(players, numRounds, options = {}) {
-    const gradeLevel     = options.gradeAvoidLevel  ?? 2;
-    const rankLevel      = options.rankBalanceLevel ?? 2;
-    const gradePenalty   = this.GRADE_PENALTIES[gradeLevel] ?? 100;
-    const rankWeight     = this.RANK_WEIGHTS[rankLevel]     ?? 15;
-    // 実現可能性チェック
+    const gradeLevel      = options.gradeAvoidLevel  ?? 2;
+    const rankLevel       = options.rankBalanceLevel ?? 2;
+    const gradePenalty    = this.GRADE_PENALTIES[gradeLevel] ?? 100;
+    const rankWeight      = this.RANK_WEIGHTS[rankLevel]     ?? 15;
+    const assignSenteGote = options.assignSenteGote ?? true;
+
     if (players.length < 2) {
       return { error: 'プレイヤーが2人以上必要です。' };
     }
@@ -31,25 +32,26 @@ const Matching = {
       };
     }
 
-    const matchHistory = new Set(); // "id1-id2" (sorted)
-    const rankHistory = {};         // { playerId: { S: 0, A: 0, B: 0, C: 0 } }
-    const byeCounts = {};           // { playerId: byeCount }
+    const matchHistory = new Set();
+    const rankHistory  = {};
+    const byeCounts    = {};
+    const senteHistory = {};
 
-    // 初期化
     players.forEach(p => {
-      rankHistory[p.id] = { S: 0, A: 0, B: 0, C: 0 };
-      byeCounts[p.id] = 0;
+      rankHistory[p.id]  = { S: 0, A: 0, B: 0, C: 0 };
+      byeCounts[p.id]    = 0;
+      senteHistory[p.id] = 0;
     });
 
     const allRounds = [];
-    const maxRetries = 50; // 全体リトライ上限
+    const maxRetries = 50;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // リセット
       matchHistory.clear();
       players.forEach(p => {
-        rankHistory[p.id] = { S: 0, A: 0, B: 0, C: 0 };
-        byeCounts[p.id] = 0;
+        rankHistory[p.id]  = { S: 0, A: 0, B: 0, C: 0 };
+        byeCounts[p.id]    = 0;
+        senteHistory[p.id] = 0;
       });
       allRounds.length = 0;
 
@@ -60,34 +62,31 @@ const Matching = {
           players, matchHistory, rankHistory, byeCounts, round, gradePenalty, rankWeight
         );
 
-        if (!result) {
-          success = false;
-          break;
+        if (!result) { success = false; break; }
+
+        // 先後割り当て
+        if (assignSenteGote) {
+          result.matches = this._assignSenteGote(result.matches, senteHistory);
         }
 
         allRounds.push(result);
 
         // 履歴更新
         result.matches.forEach(match => {
-          const key = this.makeMatchKey(match.player1Id, match.player2Id);
-          matchHistory.add(key);
-
+          matchHistory.add(this.makeMatchKey(match.player1Id, match.player2Id));
           const p1 = players.find(p => p.id === match.player1Id);
           const p2 = players.find(p => p.id === match.player2Id);
           if (p1 && p2) {
             rankHistory[p1.id][p2.rank]++;
             rankHistory[p2.id][p1.rank]++;
           }
+          if (assignSenteGote) senteHistory[match.player1Id]++;
         });
 
-        if (result.byePlayerId) {
-          byeCounts[result.byePlayerId]++;
-        }
+        if (result.byePlayerId) byeCounts[result.byePlayerId]++;
       }
 
-      if (success) {
-        return { rounds: allRounds };
-      }
+      if (success) return { rounds: allRounds };
     }
 
     return { error: 'マッチングの生成に失敗しました。プレイヤー数とラウンド数の組み合わせを見直してください。' };
@@ -100,9 +99,11 @@ const Matching = {
     const matchHistory = new Set();
     const rankHistory  = {};
     const byeCounts    = {};
+    const senteHistory = {};  // 各選手の先手回数
     players.forEach(p => {
-      rankHistory[p.id] = { S: 0, A: 0, B: 0, C: 0 };
-      byeCounts[p.id]   = 0;
+      rankHistory[p.id]  = { S: 0, A: 0, B: 0, C: 0 };
+      byeCounts[p.id]    = 0;
+      senteHistory[p.id] = 0;
     });
     rounds.forEach(round => {
       round.matches.forEach(match => {
@@ -113,10 +114,12 @@ const Matching = {
           rankHistory[p1.id][p2.rank]++;
           rankHistory[p2.id][p1.rank]++;
         }
+        // player1 = 先手としてカウント
+        if (senteHistory[match.player1Id] !== undefined) senteHistory[match.player1Id]++;
       });
       if (round.byePlayerId) byeCounts[round.byePlayerId]++;
     });
-    return { matchHistory, rankHistory, byeCounts };
+    return { matchHistory, rankHistory, byeCounts, senteHistory };
   },
 
   /**
@@ -129,9 +132,10 @@ const Matching = {
 
     const gradeLevel   = options.gradeAvoidLevel  ?? 2;
     const rankLevel    = options.rankBalanceLevel ?? 2;
-    const gradePenalty = this.GRADE_PENALTIES[gradeLevel] ?? 100;
-    const rankWeight   = this.RANK_WEIGHTS[rankLevel]     ?? 15;
-    const { matchHistory, rankHistory, byeCounts } = this.buildHistoryFromRounds(players, existingRounds);
+    const gradePenalty    = this.GRADE_PENALTIES[gradeLevel] ?? 100;
+    const rankWeight      = this.RANK_WEIGHTS[rankLevel]     ?? 15;
+    const assignSenteGote = options.assignSenteGote ?? true;
+    const { matchHistory, rankHistory, byeCounts, senteHistory } = this.buildHistoryFromRounds(players, existingRounds);
     const roundIndex = existingRounds.length;
 
     // 現在の得点マップを構築（空き手合いは常に不戦勝扱い）
@@ -164,19 +168,56 @@ const Matching = {
       return { error: 'スイスドローの生成に失敗しました。' };
     }
 
+    // 先後割り当て
+    const assignedPairs = assignSenteGote
+      ? this._assignSenteGote(
+          bestPairs.map(([p1, p2]) => ({
+            player1Id: p1.id, player1Name: p1.name,
+            player1Rank: p1.rank, player1Grade: p1.grade,
+            player2Id: p2.id, player2Name: p2.name,
+            player2Rank: p2.rank, player2Grade: p2.grade,
+            result: null
+          })),
+          senteHistory
+        )
+      : bestPairs.map(([p1, p2]) => ({
+          player1Id: p1.id, player1Name: p1.name,
+          player1Rank: p1.rank, player1Grade: p1.grade,
+          player2Id: p2.id, player2Name: p2.name,
+          player2Rank: p2.rank, player2Grade: p2.grade,
+          result: null
+        }));
+
     return {
       round: {
         roundNumber: roundIndex + 1,
-        matches: bestPairs.map(([p1, p2]) => ({
-          player1Id:    p1.id,   player2Id:    p2.id,
-          player1Name:  p1.name, player2Name:  p2.name,
-          player1Rank:  p1.rank, player2Rank:  p2.rank,
-          player1Grade: p1.grade,player2Grade: p2.grade,
-          result: null
-        })),
+        matches:     assignedPairs,
         byePlayerId: bestByeId
       }
     };
+  },
+
+  /**
+   * 先後均等化：各マッチに先手・後手を割り当てる
+   * match オブジェクト（player1Id/player2Id等を持つ）の配列を受け取り、
+   * 先手回数が少ない方を player1（先手）にして返す
+   */
+  _assignSenteGote(matches, senteHistory) {
+    return matches.map(match => {
+      const s1 = senteHistory[match.player1Id] ?? 0;
+      const s2 = senteHistory[match.player2Id] ?? 0;
+      // player1 の先手回数が多い場合は先後を入れ替え
+      if (s1 > s2 || (s1 === s2 && Math.random() < 0.5)) {
+        return {
+          player1Id:    match.player2Id,    player2Id:    match.player1Id,
+          player1Name:  match.player2Name,  player2Name:  match.player1Name,
+          player1Rank:  match.player2Rank,  player2Rank:  match.player1Rank,
+          player1Grade: match.player2Grade, player2Grade: match.player1Grade,
+          result: null
+        };
+      }
+      return { ...match, result: null };
+    });
   },
 
   _trySwissPairing(players, matchHistory, rankHistory, byeCounts, pointsMap, gradePenalty, rankWeight) {
