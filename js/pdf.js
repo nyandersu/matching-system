@@ -119,8 +119,8 @@ const PDF = {
   /**
    * 対戦表HTML生成
    */
-  buildMatchTableHTML(rounds, players, opts = { showGrade: true, showRank: true }) {
-    const { showGrade, showRank } = opts;
+  buildMatchTableHTML(rounds, players, opts = { showGrade: true, showRank: true, assignSenteGote: true }) {
+    const { showGrade, showRank, assignSenteGote } = opts;
     const playerMap = {};
     players.forEach(p => { playerMap[p.id] = p; });
 
@@ -130,6 +130,9 @@ const PDF = {
       if (showRank  && rank  != null) s += ` <span class="rank-${rank}">${rank}</span>`;
       return s;
     };
+
+    const col1 = assignSenteGote ? '先手' : '選手①';
+    const col2 = assignSenteGote ? '後手' : '選手②';
 
     let html = `
       <h1>将棋部内戦 対戦表</h1>
@@ -141,9 +144,9 @@ const PDF = {
           <thead>
             <tr>
               <th style="width:5%">No.</th>
-              <th style="width:36%">先手</th>
+              <th style="width:36%">${col1}</th>
               <th style="width:18%">結果</th>
-              <th style="width:36%">後手</th>
+              <th style="width:36%">${col2}</th>
             </tr>
           </thead>
           <tbody>`;

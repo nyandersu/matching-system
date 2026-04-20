@@ -496,7 +496,11 @@ const UI = {
         this.showToast('エクスポートする対戦表がありません', 'error');
         return;
       }
-      PDF.exportMatchTable(rounds, players, this.displayOpts);
+      const settings = AppStorage.getSettings();
+      PDF.exportMatchTable(rounds, players, {
+        ...this.displayOpts,
+        assignSenteGote: settings.assignSenteGote,
+      });
     });
   },
 
