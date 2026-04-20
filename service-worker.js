@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shogi-match-v3';
+const CACHE_NAME = 'shogi-match-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,6 @@ const ASSETS = [
   './js/matching.js',
   './js/ui.js',
   './js/pdf.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'
 ];
 
 self.addEventListener('install', (event) => {
