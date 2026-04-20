@@ -22,6 +22,7 @@ const UI = {
     this.bindDisplayOpts();
     this.bindSettingsEvents();
     this.bindPasswordChangeEvents();
+    this._bindPlayerDetailModal();
 
     // 部屋バッジを表示
     this._showRoomBadge();
@@ -951,7 +952,7 @@ const UI = {
                 <td class="position-cell">
                   ${s.position <= 3 ? `<span class="medal medal-${s.position}">${['🥇','🥈','🥉'][s.position-1]}</span>` : s.position}
                 </td>
-                <td class="name-cell">${this.escapeHtml(s.name)}</td>
+                <td class="name-cell name-cell-link" onclick="UI.showPlayerDetail('${s.id}')">${this.escapeHtml(s.name)} <span class="name-cell-hint">›</span></td>
                 <td>${s.grade}年</td>
                 <td class="win-cell">${s.wins}</td>
                 <td class="loss-cell">${s.losses}</td>
@@ -966,6 +967,159 @@ const UI = {
       </div>`;
 
     container.innerHTML = html;
+  },
+
+  // ============================================
+  // 個人成績モーダル
+  // ============================================
+
+  _bindPlayerDetailModal() {
+    document.getElementById('player-detail-close').addEventListener('click', () => {
+      document.getElementById('player-detail-modal').classList.add('hidden');
+    });
+    document.getElementById('player-detail-modal').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) {
+        e.currentTarget.classList.add('hidden');
+      }
+    });
+  },
+
+  showPlayerDetail(playerId) {
+    const players  = AppStorage.getPlayers();
+    const rounds   = AppStorage.getRounds();
+    const player   = players.find(p => p.id === playerId);
+    if (!player) return;
+
+    const standings = Matching.calculateStandings(players, rounds, true);
+    const stat      = standings.find(s => s.id === playerId) || {};
+    const history   = this._getPlayerHistory(playerId, rounds);
+
+    // ランク別戦績
+    const rankStats = { S: { w:0, l:0, d:0 }, A: { w:0, l:0, d:0 }, B: { w:0, l:0, d:0 }, C: { w:0, l:0, d:0 } };
+    history.filter(h => h.type === 'match').forEach(h => {
+      const r = rankStats[h.opponentRank];
+      if (!r || !h.result) return;
+      if (h.result === 'win')  r.w++;
+      else if (h.result === 'loss') r.l++;
+      else if (h.result === 'draw') r.d++;
+    });
+
+    const resultBadge = (r) =>
+        r === 'win'  ? '<span class="pd-result win">○ 勝</span>'
+      : r === 'loss' ? '<span class="pd-result loss">● 敗</span>'
+      : r === 'draw' ? '<span class="pd-result draw">△ 分</span>'
+      : r === 'bye'  ? '<span class="pd-result bye">不戦勝</span>'
+      :                '<span class="pd-result pending">未入力</span>';
+
+    const rankRowHtml = Object.entries(rankStats)
+      .filter(([, v]) => v.w + v.l + v.d > 0)
+      .map(([rank, v]) => `
+        <div class="pd-rank-row">
+          <span class="rank-badge rank-${rank}">${rank}</span>
+          <span class="pd-rank-record">
+            <span class="pd-w">${v.w}勝</span>
+            <span class="pd-l">${v.l}敗</span>
+            ${v.d > 0 ? `<span class="pd-d">${v.d}分</span>` : ''}
+          </span>
+          <div class="pd-rank-bar">
+            ${v.w + v.l + v.d > 0 ? `
+              <div class="pd-bar-win"  style="width:${v.w/(v.w+v.l+v.d)*100}%"></div>
+              <div class="pd-bar-loss" style="width:${v.l/(v.w+v.l+v.d)*100}%"></div>
+              <div class="pd-bar-draw" style="width:${v.d/(v.w+v.l+v.d)*100}%"></div>
+            ` : ''}
+          </div>
+        </div>`).join('');
+
+    const historyRowsHtml = history.length === 0
+      ? '<p class="pd-empty">対戦データがありません</p>'
+      : history.map(h => {
+          if (h.type === 'bye') return `
+            <tr>
+              <td class="pd-round">第${h.roundNumber}回戦</td>
+              <td colspan="2" class="pd-bye-cell">— 空き手合い —</td>
+              <td>${resultBadge('bye')}</td>
+            </tr>`;
+          const sideLabel = h.side === 'player1' ? '<span class="pd-side sente">先手</span>' : '<span class="pd-side gote">後手</span>';
+          return `
+            <tr>
+              <td class="pd-round">第${h.roundNumber}回戦</td>
+              <td class="pd-opponent">
+                <span class="pd-opp-name">${this.escapeHtml(h.opponentName)}</span>
+                <span class="pd-opp-meta">${h.opponentGrade}年 <span class="rank-badge rank-${h.opponentRank}" style="font-size:10px;padding:1px 5px;">${h.opponentRank}</span></span>
+              </td>
+              <td>${sideLabel}</td>
+              <td>${resultBadge(h.result)}</td>
+            </tr>`;
+        }).join('');
+
+    const totalGames = (stat.wins || 0) + (stat.losses || 0) + (stat.draws || 0);
+    const winPct = totalGames > 0 ? ((stat.wins || 0) / totalGames * 100).toFixed(0) : 0;
+
+    document.getElementById('player-detail-content').innerHTML = `
+      <div class="pd-header">
+        <span class="rank-badge rank-${player.rank} pd-rank-badge">${player.rank}</span>
+        <div class="pd-name-block">
+          <span class="pd-name">${this.escapeHtml(player.name)}</span>
+          <span class="pd-grade">${player.grade}年</span>
+        </div>
+        <div class="pd-position">${stat.position ? `<span class="pd-pos-num">${stat.position}</span>位` : '—'}</div>
+      </div>
+
+      <div class="pd-summary">
+        <div class="pd-stat-box"><span class="pd-stat-val win-color">${stat.wins ?? 0}</span><span class="pd-stat-lbl">勝</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val loss-color">${stat.losses ?? 0}</span><span class="pd-stat-lbl">敗</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val">${stat.draws ?? 0}</span><span class="pd-stat-lbl">分</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val bye-color">${stat.byes ?? 0}</span><span class="pd-stat-lbl">不戦勝</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val">${winPct}%</span><span class="pd-stat-lbl">勝率</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val amber-color">${stat.points ?? 0}</span><span class="pd-stat-lbl">Pt</span></div>
+      </div>
+
+      ${rankRowHtml ? `
+      <div class="pd-section">
+        <h3 class="pd-section-title">ランク別戦績</h3>
+        <div class="pd-rank-stats">${rankRowHtml}</div>
+      </div>` : ''}
+
+      <div class="pd-section">
+        <h3 class="pd-section-title">対戦履歴</h3>
+        <table class="pd-history-table">
+          <thead>
+            <tr><th>回戦</th><th>対戦相手</th><th>先後</th><th>結果</th></tr>
+          </thead>
+          <tbody>${historyRowsHtml}</tbody>
+        </table>
+      </div>`;
+
+    document.getElementById('player-detail-modal').classList.remove('hidden');
+  },
+
+  _getPlayerHistory(playerId, rounds) {
+    const history = [];
+    rounds.forEach(round => {
+      if (round.byePlayerId === playerId) {
+        history.push({ roundNumber: round.roundNumber, type: 'bye', result: 'bye' });
+        return;
+      }
+      const match = round.matches.find(m => m.player1Id === playerId || m.player2Id === playerId);
+      if (!match) return;
+      const isP1 = match.player1Id === playerId;
+      let result = null;
+      if (match.result) {
+        if (match.result === 'draw') result = 'draw';
+        else result = (match.result === 'player1') === isP1 ? 'win' : 'loss';
+      }
+      history.push({
+        roundNumber:   round.roundNumber,
+        type:          'match',
+        opponentId:    isP1 ? match.player2Id    : match.player1Id,
+        opponentName:  isP1 ? match.player2Name  : match.player1Name,
+        opponentGrade: isP1 ? match.player2Grade : match.player1Grade,
+        opponentRank:  isP1 ? match.player2Rank  : match.player1Rank,
+        side:          isP1 ? 'player1' : 'player2',
+        result,
+      });
+    });
+    return history;
   },
 
   // ============================================
