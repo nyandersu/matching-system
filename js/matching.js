@@ -213,15 +213,16 @@ const Matching = {
       for (let j = i + 1; j < active.length; j++) {
         if (used.has(active[j].id)) continue;
 
-        const key        = this.makeMatchKey(active[i].id, active[j].id);
-        const rematch    = matchHistory.has(key) ? 10000 : 0;
+        // 再戦は絶対禁止
+        if (matchHistory.has(this.makeMatchKey(active[i].id, active[j].id))) continue;
+
         const standingGap = (j - i) * 25;          // 順位差ペナルティ（スイスの核心）
         const ptsDiff    = Math.abs((pointsMap[active[i].id] ?? 0) - (pointsMap[active[j].id] ?? 0)) * 20;
         const gradeP     = active[i].grade === active[j].grade ? gradePenalty : 0;
         const rankP      = ((rankHistory[active[i].id]?.[active[j].rank] ?? 0) +
                             (rankHistory[active[j].id]?.[active[i].rank] ?? 0)) * rankWeight;
 
-        const score = rematch + standingGap + ptsDiff + gradeP + rankP + Math.random() * 5;
+        const score = standingGap + ptsDiff + gradeP + rankP + Math.random() * 5;
         if (score < bestScore) { bestScore = score; bestJ = j; }
       }
 
@@ -305,19 +306,17 @@ const Matching = {
       for (let j = i + 1; j < n; j++) {
         if (used.has(players[j].id)) continue;
 
-        const key = this.makeMatchKey(players[i].id, players[j].id);
-        const isRematch = matchHistory.has(key);
-        // 再戦禁止を絶対条件ではなく極めて重いペナルティとし、生成が100%失敗するのを防ぐ
-        const rematchPenalty = isRematch ? 10000 : 0; 
+        // 再戦は絶対禁止 — スキップして別シャッフルに委ねる
+        if (matchHistory.has(this.makeMatchKey(players[i].id, players[j].id))) continue;
 
-        const score = this.pairScore(players[i], players[j], rankHistory, gradePenalty, rankWeight) + rematchPenalty;
+        const score = this.pairScore(players[i], players[j], rankHistory, gradePenalty, rankWeight);
         if (score < bestScore) {
           bestScore = score;
           bestPartner = j;
         }
       }
 
-      if (bestPartner === null) return null; // ペアリング不可
+      if (bestPartner === null) return null; // 再試行（別シャッフルで解決）
 
       used.add(players[i].id);
       used.add(players[bestPartner].id);
@@ -338,20 +337,13 @@ const Matching = {
       score += gradePenalty;
     }
 
-    // ランク分散ペナルティ
-    // p1がp2のランクと対戦する偏りをチェック
+    // ランク分散ペナルティ（同一ランク同士のボーナス/ペナルティは設けない）
     const p1RankHist = rankHistory[p1.id];
     const p2RankHist = rankHistory[p2.id];
 
     if (p1RankHist && p2RankHist) {
       score += p1RankHist[p2.rank] * rankWeight;
       score += p2RankHist[p1.rank] * rankWeight;
-    }
-
-    // ランクが近いほど若干の加点（近いランク同士ばかりにならないよう）
-    const rankDiff = Math.abs(this.RANKS.indexOf(p1.rank) - this.RANKS.indexOf(p2.rank));
-    if (rankDiff === 0) {
-      score += 5;
     }
 
     // ランダム性を追加して多様な組み合わせを生成
