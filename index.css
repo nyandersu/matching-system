@@ -894,6 +894,79 @@ body::before {
   font-size: 16px;
 }
 
+/* --- Standings Header Actions --- */
+.standings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+}
+
+.btn-ghost.toggle-active {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* --- Pt算出方法モーダル --- */
+.pt-info-card {
+  max-width: 340px;
+  padding: 28px 24px;
+}
+
+.pt-info-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  color: var(--text-primary);
+}
+
+.pt-info-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 14px;
+}
+
+.pt-info-table tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.pt-info-table td {
+  padding: 9px 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.pt-info-table .pt-val {
+  text-align: right;
+  font-weight: 700;
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.pt-info-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
 /* --- Toast Notifications --- */
 #toast-container {
   position: fixed;
@@ -2091,6 +2164,38 @@ body::before {
   font-size: 11px;
   color: var(--text-muted);
   margin-left: 2px;
+}
+
+/* --- Sente / Gote labels --- */
+.sente-label,
+.gote-label {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  vertical-align: middle;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.sente-label {
+  background: rgba(230, 168, 23, 0.18);
+  color: var(--amber-light);
+  border: 1px solid rgba(230, 168, 23, 0.35);
+}
+
+.gote-label {
+  background: rgba(76, 140, 231, 0.18);
+  color: var(--accent-blue);
+  border: 1px solid rgba(76, 140, 231, 0.35);
+}
+
+/* match-player に flex を持たせてラベルと player-info を横並びに */
+.match-player {
+  display: flex;
+  align-items: center;
 }
 
 /* hidden utility */

@@ -236,6 +236,14 @@
           </select>
         </div>
         <div class="form-group weight-group">
+          <label class="form-label">先手・後手の割り当て</label>
+          <div class="weight-segment" id="sente-gote-segment">
+            <button type="button" class="wseg-btn wseg-active" data-value="1">指定あり（先後均等化）</button>
+            <button type="button" class="wseg-btn" data-value="0">指定なし</button>
+          </div>
+          <input type="hidden" id="assign-sente-gote" value="1">
+        </div>
+        <div class="form-group weight-group">
           <label class="form-label">同学年対決の回避</label>
           <div class="weight-segment" id="grade-avoid-segment">
             <button type="button" class="wseg-btn" data-value="0">無効</button>
@@ -310,9 +318,13 @@
   <div class="tab-panel" id="tab-standings" role="tabpanel">
     <div class="section-header">
       <h2 class="section-title"><span>🏆</span> 成績順位表</h2>
-      <button class="btn btn-secondary" id="export-standings-btn">
-        📄 成績表PDF出力
-      </button>
+      <div class="standings-header-actions">
+        <button class="btn btn-ghost btn-sm" id="pt-info-btn" title="Pt算出方法">Pt算出方法 ℹ</button>
+        <button class="btn btn-ghost btn-sm toggle-active" id="toggle-pt-btn">Pt 表示中</button>
+        <button class="btn btn-secondary" id="export-standings-btn">
+          📄 成績表PDF出力
+        </button>
+      </div>
     </div>
     <div class="card">
       <div id="standings-container"></div>
@@ -358,6 +370,21 @@
   <div class="modal-card">
     <button class="modal-close" id="player-detail-close" aria-label="閉じる">✕</button>
     <div id="player-detail-content"></div>
+  </div>
+</div>
+
+<!-- Pt算出方法モーダル -->
+<div id="pt-info-modal" class="modal-overlay hidden">
+  <div class="modal-card pt-info-card">
+    <button class="modal-close" id="pt-info-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">Pt（ポイント）算出方法</h3>
+    <table class="pt-info-table">
+      <tr><td>対局勝利</td><td class="pt-val">+2 Pt</td></tr>
+      <tr><td>不戦勝（BYE）</td><td class="pt-val">+2 Pt</td></tr>
+      <tr><td>引き分け</td><td class="pt-val">+1 Pt</td></tr>
+      <tr><td>敗北</td><td class="pt-val">+0 Pt</td></tr>
+    </table>
+    <p class="pt-info-note">順位はPt降順 → (勝+不戦勝)降順 → 勝率降順で決定します。</p>
   </div>
 </div>
 
