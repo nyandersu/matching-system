@@ -846,9 +846,10 @@ const UI = {
       const completedCount = round.matches.filter(m => m.result).length;
       const totalCount = round.matches.length;
       const progressPct = totalCount > 0 ? (completedCount / totalCount * 100) : 0;
+      const isConfirmed = !!round.confirmed;
 
       html += `
-        <div class="round-card">
+        <div class="round-card${isConfirmed ? ' round-confirmed' : ''}">
           <h3 class="round-title">
             <span class="round-number">第${round.roundNumber}回戦</span>
             <span class="progress-text">${completedCount}/${totalCount} 完了</span>
@@ -867,6 +868,10 @@ const UI = {
                 showGrade ? `${match.player2Grade}年` : '',
                 showRank  ? match.player2Rank : ''
               ].filter(Boolean).join(' ');
+              const onclick1 = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, 'player1')"`;
+              const onclickD = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, 'draw')"`;
+              const onclick2 = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, 'player2')"`;
+              const onclickR = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, null)"`;
               return `
               <div class="result-row ${match.result ? 'completed' : ''}">
                 <div class="result-player p1 ${match.result === 'player1' ? 'winner' : ''}">
@@ -875,14 +880,13 @@ const UI = {
                 </div>
                 <div class="result-buttons">
                   <button class="result-btn win-btn ${match.result === 'player1' ? 'active' : ''}"
-                    onclick="UI.setResult(${ri}, ${mi}, 'player1')" title="${match.player1Name} の勝ち">○</button>
+                    ${isConfirmed ? 'disabled' : ''} ${onclick1} title="${match.player1Name} の勝ち">○</button>
                   <button class="result-btn draw-btn ${match.result === 'draw' ? 'active' : ''}"
-                    onclick="UI.setResult(${ri}, ${mi}, 'draw')" title="引き分け">△</button>
+                    ${isConfirmed ? 'disabled' : ''} ${onclickD} title="引き分け">△</button>
                   <button class="result-btn win-btn ${match.result === 'player2' ? 'active' : ''}"
-                    onclick="UI.setResult(${ri}, ${mi}, 'player2')" title="${match.player2Name} の勝ち">○</button>
-                  ${match.result ? `
-                    <button class="result-btn reset-btn"
-                      onclick="UI.setResult(${ri}, ${mi}, null)" title="リセット">✕</button>
+                    ${isConfirmed ? 'disabled' : ''} ${onclick2} title="${match.player2Name} の勝ち">○</button>
+                  ${match.result && !isConfirmed ? `
+                    <button class="result-btn reset-btn" ${onclickR} title="リセット">✕</button>
                   ` : ''}
                 </div>
                 <div class="result-player p2 ${match.result === 'player2' ? 'winner' : ''}">
@@ -897,6 +901,14 @@ const UI = {
               <span class="bye-label">不戦勝:</span>
               <span>${this.escapeHtml(playerMap[round.byePlayerId].name)}</span>
             </div>` : ''}
+          <div class="round-confirm-bar">
+            ${isConfirmed ? `
+              <span class="confirm-badge">✓ 確定済み</span>
+              <button class="btn btn-ghost btn-sm" onclick="UI.unconfirmRound(${ri})">確定を解除</button>
+            ` : `
+              <button class="btn btn-confirm btn-sm" onclick="UI.confirmRound(${ri})">この回戦を確定する</button>
+            `}
+          </div>
         </div>`;
     });
 
@@ -907,6 +919,28 @@ const UI = {
     AppStorage.updateMatchResult(roundIndex, matchIndex, result);
     this.renderRounds();
     this.updateGenerateButton();
+  },
+
+  confirmRound(roundIndex) {
+    const rounds = AppStorage.getRounds();
+    const round = rounds[roundIndex];
+    if (!round) return;
+    const pending = round.matches.filter(m => !m.result).length;
+    if (pending > 0) {
+      if (!confirm(`${pending}件の結果が未入力ですが、この回戦を確定しますか？`)) return;
+    }
+    AppStorage.setRoundConfirmed(roundIndex, true);
+    this.renderRounds();
+    this.showToast(`第${round.roundNumber}回戦を確定しました`, 'success');
+  },
+
+  unconfirmRound(roundIndex) {
+    const rounds = AppStorage.getRounds();
+    const round = rounds[roundIndex];
+    if (!round) return;
+    AppStorage.setRoundConfirmed(roundIndex, false);
+    this.renderRounds();
+    this.showToast(`第${round.roundNumber}回戦の確定を解除しました`, 'info');
   },
 
   // ============================================

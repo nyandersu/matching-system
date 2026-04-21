@@ -199,11 +199,15 @@ const AppStorage = {
       }
 
       if (rQuery.data && rQuery.data.length > 0) {
-        data.rounds = rQuery.data.map(r => ({
-          roundNumber:  r.round_number,
-          matches:      r.matches,
-          byePlayerId:  r.bye_player_id
-        }));
+        data.rounds = rQuery.data.map(r => {
+          const local = data.rounds.find(lr => lr.roundNumber === r.round_number);
+          return {
+            roundNumber:  r.round_number,
+            matches:      r.matches,
+            byePlayerId:  r.bye_player_id,
+            confirmed:    local?.confirmed || false,
+          };
+        });
       }
 
       localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
@@ -326,6 +330,14 @@ const AppStorage = {
     const data = this.loadAll();
     if (data.rounds[roundIndex]?.matches[matchIndex]) {
       data.rounds[roundIndex].matches[matchIndex].result = result;
+      this.saveAll(data);
+    }
+  },
+
+  setRoundConfirmed(roundIndex, confirmed) {
+    const data = this.loadAll();
+    if (data.rounds[roundIndex]) {
+      data.rounds[roundIndex].confirmed = confirmed;
       this.saveAll(data);
     }
   },
