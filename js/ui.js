@@ -447,13 +447,19 @@ const UI = {
     });
 
     // セグメントコントロール（先後割り当て・同学年回避・ランク均等化）
-    ['sente-gote', 'grade-avoid', 'rank-balance'].forEach(id => {
+    // ※ sente-gote の hidden input は命名が異なるため個別にマップ
+    const segmentInputMap = {
+      'sente-gote':   'assign-sente-gote',
+      'grade-avoid':  'grade-avoid-weight',
+      'rank-balance': 'rank-balance-weight',
+    };
+    Object.entries(segmentInputMap).forEach(([id, inputId]) => {
       document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll(`#${id}-segment .wseg-btn`)
             .forEach(b => b.classList.remove('wseg-active'));
           btn.classList.add('wseg-active');
-          document.getElementById(`${id}-weight`).value = btn.dataset.value;
+          document.getElementById(inputId).value = btn.dataset.value;
         });
       });
     });
