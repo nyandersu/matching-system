@@ -234,7 +234,7 @@ body::before {
 }
 
 .form-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -1245,7 +1245,7 @@ body::before {
   border-right: 1px solid var(--border);
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -1278,20 +1278,20 @@ body::before {
 }
 
 .display-opts-label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-muted);
   font-weight: 500;
   white-space: nowrap;
 }
 
 .display-chip {
-  padding: 4px 14px;
+  padding: 5px 16px;
   border-radius: 20px;
   border: 1px solid var(--border);
   background: transparent;
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   cursor: pointer;
   transition: var(--transition-fast);
