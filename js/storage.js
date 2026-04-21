@@ -189,13 +189,16 @@ const AppStorage = {
         data.settings.numRounds = sQuery.data.num_rounds;
       }
 
-      if (pQuery.data) {
+      // Supabase が実際にデータを持っている場合のみ上書き
+      // 空配列 [] は truthy なので length チェックが必要
+      // → Supabase にデータがない（同期失敗・オフライン生成）場合はローカルを保持する
+      if (pQuery.data && pQuery.data.length > 0) {
         data.players = pQuery.data.map(p => ({
           id: p.id, name: p.name, grade: p.grade, rank: p.rank
         }));
       }
 
-      if (rQuery.data) {
+      if (rQuery.data && rQuery.data.length > 0) {
         data.rounds = rQuery.data.map(r => ({
           roundNumber:  r.round_number,
           matches:      r.matches,
