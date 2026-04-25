@@ -28,8 +28,8 @@ const PDF = {
   /**
    * 成績表をPDFとしてエクスポート
    */
-  exportStandings(standings) {
-    const html = this.buildStandingsHTML(standings);
+  exportStandings(standings, opts = { showPoints: true }) {
+    const html = this.buildStandingsHTML(standings, opts);
     this._openPrintWindow(html, '成績表');
   },
 
@@ -199,7 +199,8 @@ const PDF = {
   /**
    * 成績表HTML生成
    */
-  buildStandingsHTML(standings) {
+  buildStandingsHTML(standings, opts = { showPoints: true }) {
+    const showPt = opts.showPoints !== false;
     let html = `
       <h1>将棋部内戦 成績表</h1>
       <p class="subtitle">生成日: ${new Date().toLocaleDateString('ja-JP')}</p>
@@ -214,7 +215,7 @@ const PDF = {
             <th>分</th>
             <th>不戦勝</th>
             <th>勝率</th>
-            <th>Pt</th>
+            ${showPt ? '<th>Pt</th>' : ''}
           </tr>
         </thead>
         <tbody>`;
@@ -230,7 +231,7 @@ const PDF = {
             <td>${this._esc(s.draws)}</td>
             <td>${this._esc(s.byes)}</td>
             <td>${this._esc(s.winRate.toFixed(1))}%</td>
-            <td class="pt-td">${this._esc(s.points)}</td>
+            ${showPt ? `<td class="pt-td">${this._esc(s.points)}</td>` : ''}
           </tr>`;
     });
 
