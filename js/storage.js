@@ -18,18 +18,27 @@ const AppStorage = {
   // セッション管理（ログイン・ログアウト）
   // ============================================
 
-  /** セッション取得（未ログイン時は null） */
+  /** セッション取得（7日で期限切れ、未ログイン時は null） */
   getSession() {
     try {
-      return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      if (!s) return null;
+      const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7日
+      if (s.createdAt && Date.now() - s.createdAt > SESSION_TTL_MS) {
+        this.clearSession();
+        return null;
+      }
+      return s;
     } catch {
       return null;
     }
   },
 
-  /** セッション保存 */
+  /** セッション保存（作成時刻付き） */
   saveSession(accountId, username) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ accountId, username }));
+    localStorage.setItem(SESSION_KEY, JSON.stringify({
+      accountId, username, createdAt: Date.now()
+    }));
   },
 
   /** ログアウト */
@@ -37,63 +46,165 @@ const AppStorage = {
     localStorage.removeItem(SESSION_KEY);
   },
 
-  /** ログイン（Supabaseで照合してセッション保存） */
+  /**
+   * ログイン（サーバー側RPCで認証、パスワードハッシュはクライアントに露出しない）
+   * - サーバーはbcrypt（10ラウンド）でハッシュ比較
+   * - 旧SHA-256ハッシュはログイン成功時にbcryptへ自動移行
+   * - クライアント側ログイン試行制限（5回/15分）
+   */
   async login(username, password) {
     if (!supabaseClient) throw new Error('Supabase未接続');
-    const hash = await this._sha256(password);
-    const { data, error } = await supabaseClient
-      .from('accounts')
-      .select('id, username')
-      .eq('username', username.trim())
-      .eq('password_hash', hash)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) throw new Error('ユーザー名またはパスワードが違います');
-    this.saveSession(data.id, data.username);
-    return data;
+    const uname = username.trim();
+
+    this._checkLoginRateLimit(uname);
+
+    const { data, error } = await supabaseClient.rpc('auth_login', {
+      p_username: uname,
+      p_password: password,
+    });
+
+    if (error) {
+      this._recordLoginFailure(uname);
+      // サーバーが返すエラーメッセージ名を意味のある日本語に翻訳
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('invalid_credentials')) {
+        throw new Error('ユーザー名またはパスワードが違います');
+      }
+      throw new Error('ログインに失敗しました');
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      this._recordLoginFailure(uname);
+      throw new Error('ユーザー名またはパスワードが違います');
+    }
+
+    this._clearLoginFailures(uname);
+    this.saveSession(row.account_id, row.account_username);
+    return { id: row.account_id, username: row.account_username };
   },
 
-  /** 新規アカウント登録 */
+  /** 新規アカウント登録（サーバー側RPCでbcryptハッシュ生成） */
   async register(username, password) {
     if (!supabaseClient) throw new Error('Supabase未接続');
-    const hash = await this._sha256(password);
-    const { data, error } = await supabaseClient
-      .from('accounts')
-      .insert({ username: username.trim(), password_hash: hash })
-      .select('id, username')
-      .single();
-    if (error) {
-      if (error.code === '23505') throw new Error('そのユーザー名はすでに使われています');
-      throw error;
+    const uname = username.trim();
+
+    if (!/^[A-Za-z0-9_\-]{4,32}$/.test(uname)) {
+      throw new Error('ユーザー名は半角英数字・ハイフン・アンダースコアで4〜32文字にしてください');
     }
-    this.saveSession(data.id, data.username);
-    return data;
+    if (password.length < 6 || password.length > 128) {
+      throw new Error('パスワードは6〜128文字にしてください');
+    }
+    if (this._isCommonPassword(password)) {
+      throw new Error('このパスワードは推測されやすいため使用できません');
+    }
+
+    const { data, error } = await supabaseClient.rpc('auth_register', {
+      p_username: uname,
+      p_password: password,
+    });
+
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('23505') || msg.includes('duplicate') || msg.includes('unique')) {
+        throw new Error('そのユーザー名はすでに使われています');
+      }
+      if (msg.includes('invalid_username')) {
+        throw new Error('ユーザー名の形式が正しくありません');
+      }
+      if (msg.includes('weak_password')) {
+        throw new Error('パスワードは6文字以上にしてください');
+      }
+      throw new Error('アカウント作成に失敗しました');
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) throw new Error('アカウント作成に失敗しました');
+    this.saveSession(row.account_id, row.account_username);
+    return { id: row.account_id, username: row.account_username };
   },
 
-  /** パスワード変更（現在ログイン中のアカウント） */
+  /** パスワード変更（サーバー側RPCで検証・更新） */
   async updatePassword(currentPassword, newPassword) {
     if (!supabaseClient) throw new Error('Supabase未接続');
     const session = this.getSession();
     if (!session) throw new Error('ログインが必要です');
+    if (newPassword.length < 6 || newPassword.length > 128) {
+      throw new Error('新しいパスワードは6〜128文字にしてください');
+    }
+    if (this._isCommonPassword(newPassword)) {
+      throw new Error('このパスワードは推測されやすいため使用できません');
+    }
 
-    // 現在のパスワードを確認
-    const currentHash = await this._sha256(currentPassword);
-    const { data: account, error: fetchErr } = await supabaseClient
-      .from('accounts')
-      .select('id')
-      .eq('id', session.accountId)
-      .eq('password_hash', currentHash)
-      .maybeSingle();
-    if (fetchErr) throw fetchErr;
-    if (!account) throw new Error('現在のパスワードが違います');
+    const { error } = await supabaseClient.rpc('auth_update_password', {
+      p_account_id:       session.accountId,
+      p_current_password: currentPassword,
+      p_new_password:     newPassword,
+    });
 
-    // 新しいパスワードに更新
-    const newHash = await this._sha256(newPassword);
-    const { error } = await supabaseClient
-      .from('accounts')
-      .update({ password_hash: newHash })
-      .eq('id', session.accountId);
-    if (error) throw error;
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('invalid_current_password')) {
+        throw new Error('現在のパスワードが違います');
+      }
+      if (msg.includes('weak_password')) {
+        throw new Error('新しいパスワードが弱すぎます');
+      }
+      throw new Error('パスワード変更に失敗しました');
+    }
+  },
+
+  // ============================================
+  // ログイン試行制限（クライアント側ベストエフォート）
+  // ============================================
+  _loginFailKey(username) {
+    return 'shogi_loginfail_' + (username || '').toLowerCase();
+  },
+  _checkLoginRateLimit(username) {
+    try {
+      const raw = localStorage.getItem(this._loginFailKey(username));
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      const WINDOW = 15 * 60 * 1000; // 15分
+      const MAX    = 5;
+      const now    = Date.now();
+      if (now - (data.first || 0) > WINDOW) return;  // 期限切れ
+      if ((data.count || 0) >= MAX) {
+        const wait = Math.ceil((WINDOW - (now - data.first)) / 60000);
+        throw new Error(`ログイン試行回数が上限を超えました。約${wait}分後に再度お試しください。`);
+      }
+    } catch (e) {
+      if (e.message && e.message.includes('ログイン試行')) throw e;
+    }
+  },
+  _recordLoginFailure(username) {
+    try {
+      const key = this._loginFailKey(username);
+      const raw = localStorage.getItem(key);
+      const now = Date.now();
+      const data = raw ? JSON.parse(raw) : { count: 0, first: now };
+      if (!data.first || now - data.first > 15 * 60 * 1000) {
+        data.first = now;
+        data.count = 0;
+      }
+      data.count = (data.count || 0) + 1;
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch {}
+  },
+  _clearLoginFailures(username) {
+    try { localStorage.removeItem(this._loginFailKey(username)); } catch {}
+  },
+
+  /** よく使われる脆弱なパスワードの簡易ブロックリスト */
+  _isCommonPassword(pw) {
+    const blocked = new Set([
+      'password','password1','password12','password123',
+      '123456','1234567','12345678','123456789','1234567890',
+      'qwerty','qwerty123','abc123','111111','000000',
+      'letmein','welcome','admin','admin123','root','iloveyou',
+      'monkey','dragon','master','shogi','shogi123','tournament',
+    ]);
+    return blocked.has(pw.toLowerCase());
   },
 
   // ============================================
@@ -111,12 +222,13 @@ const AppStorage = {
     return `shogi_room_history_${session?.accountId || '_anon'}`;
   },
 
-  /** ランダムな6文字の部屋コードを生成（見間違えやすい文字を除外） */
+  /** ランダムな6文字の部屋コードを生成（見間違えやすい文字を除外、暗号学的乱数使用） */
   generateRoomId() {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    return Array.from({ length: 6 }, () =>
-      chars[Math.floor(Math.random() * chars.length)]
-    ).join('');
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32文字
+    const buf = new Uint8Array(6);
+    crypto.getRandomValues(buf);
+    // 32=2^5 なので上位5bitを使って偏りなくマッピング
+    return Array.from(buf, b => chars[b & 0x1f]).join('');
   },
 
   /** 部屋をセットし、最近の部屋リストに追加 */
@@ -357,17 +469,13 @@ const AppStorage = {
   },
 
   generateId() {
-    return 'xxxx-xxxx-xxxx'.replace(/x/g, () =>
-      Math.floor(Math.random() * 16).toString(16)
-    );
+    if (crypto.randomUUID) return crypto.randomUUID();
+    // フォールバック（暗号学的乱数）
+    const buf = new Uint8Array(12);
+    crypto.getRandomValues(buf);
+    return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
   },
 
-  /** SHA-256ハッシュ（共通ユーティリティ） */
-  async _sha256(text) {
-    const encoded = new TextEncoder().encode(text);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-    return Array.from(new Uint8Array(hashBuffer))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
+  // 認証関連のハッシュ処理はサーバー側RPC（bcrypt）に移行済み。
+  // クライアント側でパスワードをハッシュ化する処理は削除した。
 };

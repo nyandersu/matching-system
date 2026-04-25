@@ -6,6 +6,17 @@
  */
 
 const PDF = {
+  /** XSS対策：ユーザー入力をPDF HTMLに埋め込む前にエスケープ */
+  _esc(str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
   /**
    * 対戦表をPDFとしてエクスポート
    */
@@ -27,11 +38,13 @@ const PDF = {
    * （ブラウザの「PDFとして保存」でPDF出力できる）
    */
   _openPrintWindow(contentHtml, title) {
-    const win = window.open('', '_blank', 'width=900,height=700');
+    const win = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700');
     if (!win) {
       alert('ポップアップがブロックされました。\nブラウザのアドレスバー右端のアイコンからポップアップを許可してください。');
       return;
     }
+    // 新規ウィンドウから親ウィンドウへの参照を切断
+    try { win.opener = null; } catch (_) {}
 
     win.document.write(`<!DOCTYPE html>
 <html lang="ja">
@@ -125,9 +138,13 @@ const PDF = {
     players.forEach(p => { playerMap[p.id] = p; });
 
     const playerLabel = (name, grade, rank) => {
-      let s = name;
-      if (showGrade && grade != null) s += ` <span style="color:#666;font-size:11px;">${grade}年</span>`;
-      if (showRank  && rank  != null) s += ` <span class="rank-${rank}">${rank}</span>`;
+      let s = this._esc(name);
+      if (showGrade && grade != null) s += ` <span style="color:#666;font-size:11px;">${this._esc(grade)}年</span>`;
+      if (showRank  && rank  != null) {
+        // rank は S/A/B/C のみ許可
+        const safeRank = /^[SABC]$/.test(rank) ? rank : '';
+        if (safeRank) s += ` <span class="rank-${safeRank}">${safeRank}</span>`;
+      }
       return s;
     };
 
@@ -169,8 +186,8 @@ const PDF = {
 
       if (round.byePlayerId && playerMap[round.byePlayerId]) {
         const p = playerMap[round.byePlayerId];
-        const meta = showGrade ? `（${p.grade}年）` : '';
-        html += `<p class="bye-note">不戦勝: ${p.name}${meta}</p>`;
+        const meta = showGrade ? `（${this._esc(p.grade)}年）` : '';
+        html += `<p class="bye-note">不戦勝: ${this._esc(p.name)}${meta}</p>`;
       }
     });
 
@@ -203,15 +220,15 @@ const PDF = {
     standings.forEach(s => {
       html += `
           <tr>
-            <td><strong>${s.position}</strong></td>
-            <td class="name-td"><strong>${s.name}</strong></td>
-            <td>${s.grade}年</td>
-            <td class="win-td">${s.wins}</td>
-            <td class="loss-td">${s.losses}</td>
-            <td>${s.draws}</td>
-            <td>${s.byes}</td>
-            <td>${s.winRate.toFixed(1)}%</td>
-            <td class="pt-td">${s.points}</td>
+            <td><strong>${this._esc(s.position)}</strong></td>
+            <td class="name-td"><strong>${this._esc(s.name)}</strong></td>
+            <td>${this._esc(s.grade)}年</td>
+            <td class="win-td">${this._esc(s.wins)}</td>
+            <td class="loss-td">${this._esc(s.losses)}</td>
+            <td>${this._esc(s.draws)}</td>
+            <td>${this._esc(s.byes)}</td>
+            <td>${this._esc(s.winRate.toFixed(1))}%</td>
+            <td class="pt-td">${this._esc(s.points)}</td>
           </tr>`;
     });
 
