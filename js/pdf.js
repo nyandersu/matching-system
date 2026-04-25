@@ -34,101 +34,117 @@ const PDF = {
   },
 
   /**
-   * 新しいウィンドウで印刷ダイアログを開く
-   * （ブラウザの「PDFとして保存」でPDF出力できる）
+   * 印刷ダイアログを開く
+   * 非表示iframeを使うことで、ポップアップブロッカー / CSP / window.open=null
+   * といったブラウザ依存の不具合を完全に回避する。
+   * 印刷後はiframeを自動削除。
    */
   _openPrintWindow(contentHtml, title) {
-    // NOTE: features 文字列に 'noopener'/'noreferrer' を入れると window.open が null を返し
-    // document.write できなくなるため、ここでは指定せず、後続で win.opener = null して切断する。
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) {
-      alert('ポップアップがブロックされました。\nブラウザのアドレスバー右端のアイコンからポップアップを許可してください。');
-      return;
-    }
-    // 新規ウィンドウから親ウィンドウへの参照を切断（rel=noopener と同等の効果）
-    try { win.opener = null; } catch (_) {}
+    const css = `
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+        font-size: 13px;
+        color: #1a1a2e;
+        background: #fff;
+        padding: 24px 28px;
+      }
+      h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+      .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
+      h2 {
+        font-size: 15px;
+        margin: 20px 0 8px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid #333;
+        color: #1a1a2e;
+      }
+      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+      th {
+        background: #2d2d44;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 8px 10px;
+        border: 1px solid #555;
+        text-align: center;
+      }
+      td {
+        border: 1px solid #bbb;
+        padding: 7px 10px;
+        font-size: 12px;
+        text-align: center;
+        color: #1a1a2e;
+        background: #fff;
+      }
+      tr:nth-child(even) td { background: #f5f5f5; }
+      .name-td { text-align: left !important; }
+      .win-td  { color: #8a5800; font-weight: bold; }
+      .loss-td { color: #c0392b; }
+      .pt-td   { font-weight: bold; color: #8a5800; }
+      .rank-S  { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-A  { background:#e74c3c; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-B  { background:#3498db; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-C  { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
+      @page { margin: 12mm; size: A4 portrait; }
+    `;
 
-    win.document.write(`<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${title}</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', sans-serif;
-      font-size: 13px;
-      color: #1a1a2e;
-      background: #fff;
-      padding: 24px 28px;
-    }
-    h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
-    .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
-    h2 {
-      font-size: 15px;
-      margin: 20px 0 8px;
-      padding-bottom: 5px;
-      border-bottom: 2px solid #333;
-      color: #1a1a2e;
-    }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-    th {
-      background: #2d2d44;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 8px 10px;
-      border: 1px solid #555;
-      text-align: center;
-    }
-    td {
-      border: 1px solid #bbb;
-      padding: 7px 10px;
-      font-size: 12px;
-      text-align: center;
-      color: #1a1a2e;
-      background: #fff;
-    }
-    tr:nth-child(even) td { background: #f5f5f5; }
-    .name-td { text-align: left !important; }
-    .win-td  { color: #8a5800; font-weight: bold; }
-    .loss-td { color: #c0392b; }
-    .pt-td   { font-weight: bold; color: #8a5800; }
-    .rank-S  { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-    .rank-A  { background:#e74c3c; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-    .rank-B  { background:#3498db; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-    .rank-C  { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-    .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
-    .print-btn {
-      display: block;
-      margin: 0 auto 20px;
-      padding: 10px 32px;
-      background: #4f46e5;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      cursor: pointer;
-    }
-    .print-btn:hover { background: #4338ca; }
-    @media print {
-      .print-btn { display: none; }
-      body { padding: 0; }
-      @page { margin: 12mm; size: A4 portrait; }
-    }
-  </style>
+  <style>${css}</style>
 </head>
-<body>
-  <button class="print-btn" onclick="window.print()">🖨 印刷 / PDFとして保存</button>
-  ${contentHtml}
-  <script>
-    // 読み込み完了後に自動的に印刷ダイアログを開く
-    window.onload = function() { window.print(); };
-  <\/script>
-</body>
-</html>`);
-    win.document.close();
+<body>${contentHtml}</body>
+</html>`;
+
+    // 既存の印刷用iframeがあれば削除
+    const existing = document.getElementById('__print_frame__');
+    if (existing) existing.remove();
+
+    // 非表示iframeを作成
+    const iframe = document.createElement('iframe');
+    iframe.id = '__print_frame__';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow.document;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    let printed = false;
+    const triggerPrint = () => {
+      if (printed) return;
+      printed = true;
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (e) {
+        console.error('[PDF] print failed:', e);
+        alert('印刷ダイアログを開けませんでした: ' + (e.message || e));
+      }
+      // 印刷ダイアログが閉じた後にiframeを削除（少し待つ）
+      setTimeout(() => {
+        if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      }, 1500);
+    };
+
+    // iframeのload完了を待ってから印刷を発火
+    if (doc.readyState === 'complete') {
+      setTimeout(triggerPrint, 50);
+    } else {
+      iframe.addEventListener('load', () => setTimeout(triggerPrint, 50), { once: true });
+      // 念のためフォールバック（古いブラウザでloadが発火しない場合）
+      setTimeout(triggerPrint, 800);
+    }
   },
 
   /**
