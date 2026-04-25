@@ -1269,7 +1269,7 @@ const UI = {
         return;
       }
       const standings = Matching.calculateStandings(players, rounds, true);
-      PDF.exportStandings(standings);
+      PDF.exportStandings(standings, { showPoints: this.standingsOpts.showPoints });
     });
 
     document.getElementById('reset-all-btn').addEventListener('click', () => {
