@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>将棋部内戦マッチングシステム</title>
   <meta name="description" content="将棋の団体戦メンバー選考のための部内戦マッチング・成績管理システム">
+
+  <!-- セキュリティ：Content Security Policy -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+    font-src 'self' https://fonts.gstatic.com;
+    img-src 'self' data: https://upload.wikimedia.org;
+    connect-src 'self' https://*.supabase.co wss://*.supabase.co;
+    manifest-src 'self';
+    object-src 'none';
+    base-uri 'self';
+    frame-ancestors 'none';
+  ">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   
   <!-- PWA関連 -->
   <link rel="manifest" href="manifest.json">
@@ -13,8 +29,12 @@
 
   <link rel="stylesheet" href="index.css">
   
-  <!-- Supabase CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Supabase CDN（バージョン固定＋SRI：改ざん検知） -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"
+    integrity="sha384-0w2KAL2YHP6wKOkUDzkCDGgVvfmHnj02DHeQ6XcHOgTfFsGyonKOpShMH1x6nk9o"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
 
 </head>
 <body>
@@ -35,12 +55,12 @@
     <form id="login-form" autocomplete="on">
       <div class="form-group">
         <label class="form-label" for="login-username">ユーザー名</label>
-        <input type="text" id="login-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required>
+        <input type="text" id="login-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required maxlength="32">
       </div>
       <div class="form-group">
         <label class="form-label" for="login-password">パスワード</label>
         <div class="pw-input-wrap">
-          <input type="password" id="login-password" class="form-input" placeholder="パスワード" autocomplete="current-password" required>
+          <input type="password" id="login-password" class="form-input" placeholder="パスワード" autocomplete="current-password" required maxlength="128">
           <button type="button" class="toggle-pw" data-target="login-password">👁</button>
         </div>
       </div>
@@ -52,19 +72,19 @@
     <form id="register-form" class="hidden" autocomplete="on">
       <div class="form-group">
         <label class="form-label" for="register-username">ユーザー名 <span class="pw-hint">（4文字以上）</span></label>
-        <input type="text" id="register-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required>
+        <input type="text" id="register-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required maxlength="32" pattern="[A-Za-z0-9_\-]{4,32}" title="半角英数字・ハイフン・アンダースコアで4〜32文字">
       </div>
       <div class="form-group">
         <label class="form-label" for="register-password">パスワード <span class="pw-hint">（6文字以上）</span></label>
         <div class="pw-input-wrap">
-          <input type="password" id="register-password" class="form-input" placeholder="パスワード" autocomplete="new-password" required>
+          <input type="password" id="register-password" class="form-input" placeholder="パスワード" autocomplete="new-password" required maxlength="128" minlength="6">
           <button type="button" class="toggle-pw" data-target="register-password">👁</button>
         </div>
       </div>
       <div class="form-group">
         <label class="form-label" for="register-confirm">パスワード（確認）</label>
         <div class="pw-input-wrap">
-          <input type="password" id="register-confirm" class="form-input" placeholder="もう一度入力" autocomplete="new-password" required>
+          <input type="password" id="register-confirm" class="form-input" placeholder="もう一度入力" autocomplete="new-password" required maxlength="128">
           <button type="button" class="toggle-pw" data-target="register-confirm">👁</button>
         </div>
       </div>
@@ -163,7 +183,7 @@
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label" for="player-name">名前</label>
-            <input type="text" id="player-name" class="form-input" placeholder="例: 山田太郎" required>
+            <input type="text" id="player-name" class="form-input" placeholder="例: 山田太郎" required maxlength="20">
           </div>
           <div class="form-group">
             <label class="form-label" for="player-grade">学年</label>
@@ -340,21 +360,21 @@
         <div class="pw-field">
           <label class="form-label" for="pw-current">現在のパスワード</label>
           <div class="pw-input-wrap">
-            <input type="password" id="pw-current" class="form-input" placeholder="現在のパスワード" required>
+            <input type="password" id="pw-current" class="form-input" placeholder="現在のパスワード" required maxlength="128">
             <button type="button" class="toggle-pw" data-target="pw-current">👁</button>
           </div>
         </div>
         <div class="pw-field">
           <label class="form-label" for="pw-new">新しいパスワード <span class="pw-hint">（6文字以上）</span></label>
           <div class="pw-input-wrap">
-            <input type="password" id="pw-new" class="form-input" placeholder="新しいパスワード" required>
+            <input type="password" id="pw-new" class="form-input" placeholder="新しいパスワード" required maxlength="128" minlength="6">
             <button type="button" class="toggle-pw" data-target="pw-new">👁</button>
           </div>
         </div>
         <div class="pw-field">
           <label class="form-label" for="pw-confirm">新しいパスワード（確認）</label>
           <div class="pw-input-wrap">
-            <input type="password" id="pw-confirm" class="form-input" placeholder="もう一度入力" required>
+            <input type="password" id="pw-confirm" class="form-input" placeholder="もう一度入力" required maxlength="128">
             <button type="button" class="toggle-pw" data-target="pw-confirm">👁</button>
           </div>
         </div>

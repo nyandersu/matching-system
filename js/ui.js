@@ -1342,10 +1342,15 @@ const UI = {
       info: 'ℹ'
     };
 
-    toast.innerHTML = `
-      <span class="toast-icon">${icons[type] || 'ℹ'}</span>
-      <span class="toast-message">${message}</span>
-    `;
+    // XSS対策：textContent で挿入（選手名などユーザー入力がメッセージに混入するため）
+    const iconEl = document.createElement('span');
+    iconEl.className = 'toast-icon';
+    iconEl.textContent = icons[type] || 'ℹ';
+    const msgEl = document.createElement('span');
+    msgEl.className = 'toast-message';
+    msgEl.textContent = message;
+    toast.appendChild(iconEl);
+    toast.appendChild(msgEl);
 
     container.appendChild(toast);
 
