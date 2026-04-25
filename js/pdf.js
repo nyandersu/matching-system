@@ -38,12 +38,14 @@ const PDF = {
    * （ブラウザの「PDFとして保存」でPDF出力できる）
    */
   _openPrintWindow(contentHtml, title) {
-    const win = window.open('', '_blank', 'noopener,noreferrer,width=900,height=700');
+    // NOTE: features 文字列に 'noopener'/'noreferrer' を入れると window.open が null を返し
+    // document.write できなくなるため、ここでは指定せず、後続で win.opener = null して切断する。
+    const win = window.open('', '_blank', 'width=900,height=700');
     if (!win) {
       alert('ポップアップがブロックされました。\nブラウザのアドレスバー右端のアイコンからポップアップを許可してください。');
       return;
     }
-    // 新規ウィンドウから親ウィンドウへの参照を切断
+    // 新規ウィンドウから親ウィンドウへの参照を切断（rel=noopener と同等の効果）
     try { win.opener = null; } catch (_) {}
 
     win.document.write(`<!DOCTYPE html>
