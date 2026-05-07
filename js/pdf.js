@@ -1,8 +1,7 @@
 /**
  * pdf.js — PDF出力モジュール
- * ブラウザネイティブの印刷ダイアログを使用（html2canvas 依存を廃止）
- * Chrome/Edge: 「送信先」→「PDF に保存」
- * Safari: 「PDF」→「PDF として保存」
+ * html2pdf.js（jsPDF + html2canvas）でPDFを生成し、印刷ダイアログを経由せず
+ * 直接ファイルとしてダウンロードする。
  */
 
 const PDF = {
@@ -17,49 +16,61 @@ const PDF = {
       .replace(/'/g, '&#39;');
   },
 
+  /** YYYY-MM-DD 形式の今日の日付（ファイル名用） */
+  _today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  },
+
   /**
-   * 対戦表をPDFとしてエクスポート
+   * 対戦表をPDFとしてダウンロード
    */
   exportMatchTable(rounds, players, opts = { showGrade: true, showRank: true }) {
     const html = this.buildMatchTableHTML(rounds, players, opts);
-    this._openPrintWindow(html, '対戦表');
+    return this._downloadPDF(html, `対戦表_${this._today()}.pdf`);
   },
 
   /**
-   * 成績表をPDFとしてエクスポート
+   * 成績表をPDFとしてダウンロード
    */
   exportStandings(standings, opts = { showPoints: true }) {
     const html = this.buildStandingsHTML(standings, opts);
-    this._openPrintWindow(html, '成績表');
+    return this._downloadPDF(html, `成績表_${this._today()}.pdf`);
   },
 
   /**
-   * 印刷ダイアログを開く
-   * 非表示iframeを使うことで、ポップアップブロッカー / CSP / window.open=null
-   * といったブラウザ依存の不具合を完全に回避する。
-   * 印刷後はiframeを自動削除。
+   * html2pdf.js を使ってPDFを生成・ダウンロード
+   * 印刷ダイアログは経由しない。
    */
-  _openPrintWindow(contentHtml, title) {
-    const css = `
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body {
+  async _downloadPDF(contentHtml, filename) {
+    if (typeof html2pdf === 'undefined') {
+      alert('PDF生成ライブラリが読み込まれていません。ページを再読み込みしてください。');
+      return;
+    }
+    // html2canvas はレイアウト済みの DOM を必要とするため、画面外に
+    // 実寸（A4横幅相当）で描画用コンテナを生成する。
+    // padding/font は元 CSS に準拠。
+    const styleTag = `<style>
+      .__pdf_root__ * { box-sizing: border-box; margin: 0; padding: 0; }
+      .__pdf_root__ {
         font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', sans-serif;
         font-size: 13px;
         color: #1a1a2e;
         background: #fff;
         padding: 24px 28px;
+        width: 794px;
       }
-      h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
-      .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
-      h2 {
+      .__pdf_root__ h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+      .__pdf_root__ .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
+      .__pdf_root__ h2 {
         font-size: 15px;
         margin: 20px 0 8px;
         padding-bottom: 5px;
         border-bottom: 2px solid #333;
         color: #1a1a2e;
       }
-      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-      th {
+      .__pdf_root__ table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+      .__pdf_root__ th {
         background: #2d2d44;
         color: #fff;
         font-size: 12px;
@@ -68,7 +79,7 @@ const PDF = {
         border: 1px solid #555;
         text-align: center;
       }
-      td {
+      .__pdf_root__ td {
         border: 1px solid #bbb;
         padding: 7px 10px;
         font-size: 12px;
@@ -76,74 +87,46 @@ const PDF = {
         color: #1a1a2e;
         background: #fff;
       }
-      tr:nth-child(even) td { background: #f5f5f5; }
-      .name-td { text-align: left !important; }
-      .win-td  { color: #8a5800; font-weight: bold; }
-      .loss-td { color: #c0392b; }
-      .pt-td   { font-weight: bold; color: #8a5800; }
-      .rank-S  { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .rank-A  { background:#e74c3c; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .rank-B  { background:#3498db; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .rank-C  { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
-      @page { margin: 12mm; size: A4 portrait; }
-    `;
+      .__pdf_root__ tr:nth-child(even) td { background: #f5f5f5; }
+      .__pdf_root__ .name-td { text-align: left !important; }
+      .__pdf_root__ .win-td  { color: #8a5800; font-weight: bold; }
+      .__pdf_root__ .loss-td { color: #c0392b; }
+      .__pdf_root__ .pt-td   { font-weight: bold; color: #8a5800; }
+      .__pdf_root__ .rank-S  { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .__pdf_root__ .rank-A  { background:#e74c3c; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .__pdf_root__ .rank-B  { background:#3498db; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .__pdf_root__ .rank-C  { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .__pdf_root__ .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
+    </style>`;
 
-    const html = `<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <title>${title}</title>
-  <style>${css}</style>
-</head>
-<body>${contentHtml}</body>
-</html>`;
-
-    // 既存の印刷用iframeがあれば削除
-    const existing = document.getElementById('__print_frame__');
+    // 既存のPDFコンテナがあれば削除
+    const existing = document.getElementById('__pdf_container__');
     if (existing) existing.remove();
 
-    // 非表示iframeを作成
-    const iframe = document.createElement('iframe');
-    iframe.id = '__print_frame__';
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.setAttribute('aria-hidden', 'true');
-    document.body.appendChild(iframe);
+    const container = document.createElement('div');
+    container.id = '__pdf_container__';
+    container.className = '__pdf_root__';
+    container.style.position = 'absolute';
+    container.style.left = '-99999px';
+    container.style.top = '0';
+    container.style.zIndex = '-1';
+    container.innerHTML = styleTag + contentHtml;
+    document.body.appendChild(container);
 
-    const doc = iframe.contentDocument || iframe.contentWindow.document;
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    let printed = false;
-    const triggerPrint = () => {
-      if (printed) return;
-      printed = true;
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch (e) {
-        console.error('[PDF] print failed:', e);
-        alert('印刷ダイアログを開けませんでした: ' + (e.message || e));
-      }
-      // 印刷ダイアログが閉じた後にiframeを削除（少し待つ）
-      setTimeout(() => {
-        if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-      }, 1500);
-    };
-
-    // iframeのload完了を待ってから印刷を発火
-    if (doc.readyState === 'complete') {
-      setTimeout(triggerPrint, 50);
-    } else {
-      iframe.addEventListener('load', () => setTimeout(triggerPrint, 50), { once: true });
-      // 念のためフォールバック（古いブラウザでloadが発火しない場合）
-      setTimeout(triggerPrint, 800);
+    try {
+      await html2pdf().set({
+        margin:      [10, 10, 10, 10],
+        filename,
+        image:       { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
+      }).from(container).save();
+    } catch (e) {
+      console.error('[PDF] generation failed:', e);
+      alert('PDFの生成に失敗しました: ' + (e.message || e));
+    } finally {
+      if (container.parentNode) container.parentNode.removeChild(container);
     }
   },
 
@@ -255,6 +238,4 @@ const PDF = {
     return html;
   },
 
-  // 旧API互換
-  printContent(html) { this._openPrintWindow(html, '印刷'); },
 };
