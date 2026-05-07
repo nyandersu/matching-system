@@ -36,6 +36,13 @@
     crossorigin="anonymous"
     referrerpolicy="no-referrer"></script>
 
+  <!-- html2pdf.js (jsPDF + html2canvas)：PDF直接ダウンロード用 -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"
+    integrity="sha384-aBc0BOllaGWrQx51DYt978St/L7B+21jzNGc4N/jnGD0NxGwj8S/ftRgW0AkXIak"
+    crossorigin="anonymous"
+    referrerpolicy="no-referrer"></script>
+
 </head>
 <body>
 
@@ -260,10 +267,10 @@
             <button type="button" class="wseg-btn wseg-active" data-value="1">指定あり（先後均等化）</button>
             <button type="button" class="wseg-btn" data-value="0">指定なし</button>
           </div>
-          <input type="hidden" id="assign-sente-gote" value="1">
+          <input type="hidden" id="sente-gote-weight" value="1">
         </div>
         <div class="form-group weight-group">
-          <label class="form-label">同学年対決の回避</label>
+          <label class="form-label">対戦相手の学年の均等化</label>
           <div class="weight-segment" id="grade-avoid-segment">
             <button type="button" class="wseg-btn" data-value="0">無効</button>
             <button type="button" class="wseg-btn" data-value="1">低</button>
@@ -274,7 +281,7 @@
           <input type="hidden" id="grade-avoid-weight" value="2">
         </div>
         <div class="form-group weight-group">
-          <label class="form-label">ランク帯の均等化</label>
+          <label class="form-label">対戦相手のランク帯の均等化</label>
           <div class="weight-segment" id="rank-balance-segment">
             <button type="button" class="wseg-btn" data-value="0">無効</button>
             <button type="button" class="wseg-btn" data-value="1">低</button>

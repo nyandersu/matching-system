@@ -446,20 +446,14 @@ const UI = {
       this.generateMatching();
     });
 
-    // セグメントコントロール（先後割り当て・同学年回避・ランク均等化）
-    // ※ sente-gote の hidden input は命名が異なるため個別にマップ
-    const segmentInputMap = {
-      'sente-gote':   'assign-sente-gote',
-      'grade-avoid':  'grade-avoid-weight',
-      'rank-balance': 'rank-balance-weight',
-    };
-    Object.entries(segmentInputMap).forEach(([id, inputId]) => {
+    // セグメントコントロール（先後割り当て・対戦相手の学年/ランク帯の均等化）
+    ['sente-gote', 'grade-avoid', 'rank-balance'].forEach(id => {
       document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll(`#${id}-segment .wseg-btn`)
             .forEach(b => b.classList.remove('wseg-active'));
           btn.classList.add('wseg-active');
-          document.getElementById(inputId).value = btn.dataset.value;
+          document.getElementById(`${id}-weight`).value = btn.dataset.value;
         });
       });
     });
@@ -502,7 +496,7 @@ const UI = {
         this.showToast('エクスポートする対戦表がありません', 'error');
         return;
       }
-      const assignSenteGote = parseInt(document.getElementById('assign-sente-gote').value) === 1;
+      const assignSenteGote = parseInt(document.getElementById('sente-gote-weight').value) === 1;
       PDF.exportMatchTable(rounds, players, {
         ...this.displayOpts,
         assignSenteGote,
@@ -516,7 +510,7 @@ const UI = {
     const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
     const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
     const matchingFormat   = document.getElementById('matching-format').value;
-    const assignSenteGote  = parseInt(document.getElementById('assign-sente-gote').value) === 1;
+    const assignSenteGote  = parseInt(document.getElementById('sente-gote-weight').value) === 1;
 
     if (players.length < 2) {
       this.showToast('最低2人の選手が必要です', 'error');
@@ -783,7 +777,7 @@ const UI = {
 
               // ---- 通常表示 ----
               const resultClass   = match.result ? 'has-result' : '';
-              const showSenteGote = parseInt(document.getElementById('assign-sente-gote')?.value ?? '1') === 1;
+              const showSenteGote = parseInt(document.getElementById('sente-gote-weight')?.value ?? '1') === 1;
               const p1label = showSenteGote ? '<span class="sente-label">先</span>' : '';
               const p2label = showSenteGote ? '<span class="gote-label">後</span>'  : '';
               return `
