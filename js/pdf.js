@@ -191,8 +191,9 @@ const PDF = {
     // setTimeout で1tick遅らせる（極小iframeでは requestAnimationFrame が発火しないため）
     await new Promise(r => setTimeout(r, 50));
 
-    // 「跨いではいけないブロック」（.pdf-round）の document 内 Y 範囲を採取。
+    // 各回戦（.pdf-round）の document 内 Y 範囲を採取。
     // html2canvas でレンダリングする前に取得する（DOM 構造はその時点で確定済み）。
+    // 1ページ1回戦の方針のため、各ブロックの top も後で「ページ先頭オフセット」として使う。
     const SCALE = 2;
     const blocks = [];
     document.querySelectorAll('.pdf-round').forEach(el => {
@@ -221,41 +222,76 @@ const PDF = {
     const imgW = pageW - margin * 2;
     const imgH = canvas.height * imgW / canvas.width;
 
-    // 1ページに収まる場合はそのまま貼り付け
-    if (imgH <= pageH - margin * 2) {
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, imgH);
-    } else {
-      const pageContentH = pageH - margin * 2;
-      const pxPerMm      = canvas.width / imgW;
-      const pageHeightPx = Math.floor(pageContentH * pxPerMm);
+    const pageContentH = pageH - margin * 2;
+    const pxPerMm      = canvas.width / imgW;
+    const pageHeightPx = Math.floor(pageContentH * pxPerMm);
 
-      // ページ境界候補 = 各ブロックの bottom と canvas 末尾。これらでのみ改ページ。
-      // ブロックが無い（成績表など）場合は通常スライス。
-      const breakpoints = blocks.map(b => Math.round(b.bottomPx)).sort((a, b) => a - b);
-      breakpoints.push(canvas.height);
+    // 各回戦（.pdf-round）が定義されている場合は「1ページ1回戦」モード：
+    //   1ページ目はヘッダー（h1+subtitle）+ 第1回戦
+    //   2ページ目以降は各回戦を1ページずつ
+    //   各回戦が単独でページ高さを超える場合のみ内部スライス（フォールバック）
+    if (blocks.length > 0) {
+      // 各ページに描画する範囲を構築
+      // 1ページ目: [0, blocks[0].bottomPx]（ヘッダー + 第1回戦）
+      // 以降: [blocks[i-1].bottomPx, blocks[i].bottomPx] ではなく
+      //        [blocks[i].topPx, blocks[i].bottomPx] で各回戦のみ
+      const pageRanges = [];
+      // 1ページ目はヘッダーから第1回戦末尾まで
+      pageRanges.push({ from: 0, to: blocks[0].bottomPx });
+      // 2回戦以降は各回戦単独
+      for (let i = 1; i < blocks.length; i++) {
+        pageRanges.push({ from: blocks[i].topPx, to: blocks[i].bottomPx });
+      }
 
-      // ページ分割：cursor から先に進める際、breakpoints の中で
-      // (cursor, cursor + pageHeightPx] の範囲にある最大のものを採用。
-      // 該当なし（= 単一ブロックがページに収まらない）の場合のみ pageHeightPx で強制分割。
-      let cursor = 0;
-      let first  = true;
-      while (cursor < canvas.height) {
-        const limit = cursor + pageHeightPx;
-        let sliceEnd = -1;
-        for (const bp of breakpoints) {
-          if (bp > cursor && bp <= limit) {
-            sliceEnd = bp;
-          } else if (bp > limit) {
-            break;
+      let firstPage = true;
+      for (const range of pageRanges) {
+        const totalH = range.to - range.from;
+        if (totalH <= 0) continue;
+
+        // ページに収まる場合はそのまま貼り付け
+        if (totalH <= pageHeightPx) {
+          const slice = document.createElement('canvas');
+          slice.width  = canvas.width;
+          slice.height = totalH;
+          const sctx = slice.getContext('2d');
+          sctx.fillStyle = '#ffffff';
+          sctx.fillRect(0, 0, slice.width, slice.height);
+          sctx.drawImage(canvas, 0, -range.from);
+          const sliceMm = totalH / pxPerMm;
+          if (!firstPage) pdf.addPage();
+          pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, sliceMm);
+          firstPage = false;
+        } else {
+          // 単独でページ高さを超える巨大な回戦：内部分割（複数ページに分割）
+          let cursor = range.from;
+          while (cursor < range.to) {
+            const remaining = range.to - cursor;
+            const sliceH = Math.min(pageHeightPx, remaining);
+            const slice = document.createElement('canvas');
+            slice.width  = canvas.width;
+            slice.height = sliceH;
+            const sctx = slice.getContext('2d');
+            sctx.fillStyle = '#ffffff';
+            sctx.fillRect(0, 0, slice.width, slice.height);
+            sctx.drawImage(canvas, 0, -cursor);
+            const sliceMm = sliceH / pxPerMm;
+            if (!firstPage) pdf.addPage();
+            pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, sliceMm);
+            firstPage = false;
+            cursor += sliceH;
           }
         }
-        if (sliceEnd === -1) {
-          // どのブロック境界もページ高さに収まらない → 強制スライス
-          sliceEnd = Math.min(limit, canvas.height);
-        }
-        const sliceH = sliceEnd - cursor;
-        if (sliceH <= 0) break; // 安全網
-
+      }
+    } else if (imgH <= pageContentH) {
+      // ブロックなし & 1ページに収まる（成績表）
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, imgH);
+    } else {
+      // ブロックなし & 複数ページ（成績表で長い場合）：単純スライス
+      let cursor = 0;
+      let firstPage = true;
+      while (cursor < canvas.height) {
+        const remaining = canvas.height - cursor;
+        const sliceH = Math.min(pageHeightPx, remaining);
         const slice = document.createElement('canvas');
         slice.width  = canvas.width;
         slice.height = sliceH;
@@ -264,11 +300,10 @@ const PDF = {
         sctx.fillRect(0, 0, slice.width, slice.height);
         sctx.drawImage(canvas, 0, -cursor);
         const sliceMm = sliceH / pxPerMm;
-
-        if (!first) pdf.addPage();
+        if (!firstPage) pdf.addPage();
         pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, sliceMm);
-        first  = false;
-        cursor = sliceEnd;
+        firstPage = false;
+        cursor += sliceH;
       }
     }
 

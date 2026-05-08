@@ -523,7 +523,7 @@ const UI = {
 
     setTimeout(() => {
       const settings = AppStorage.getSettings();
-      const opts = { gradeAvoidLevel, rankBalanceLevel, assignSenteGote };
+      const opts = { gradeAvoidLevel, rankBalanceLevel, assignSenteGote, numRounds };
 
       if (matchingFormat === 'swiss') {
         this._generateSwissRound(players, numRounds, opts);
