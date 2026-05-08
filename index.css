@@ -637,7 +637,7 @@ body::before {
 .player-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 1em; /* 名前と学年・ランクの間を一文字分空ける */
 }
 
 .match-player.player1 .player-info {
@@ -719,7 +719,7 @@ body::before {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 1em; /* 名前と学年・ランクの間を一文字分空ける */
   font-size: 14px;
 }
 
