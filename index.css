@@ -1893,14 +1893,15 @@ body::before {
 }
 
 /* 手動編集ボタン（display-opts-bar 内）
-   表示項目チップ (.display-chip) と同等以上に視認しやすくするため、
-   サイズ・コントラストを揃える */
+   表示項目チップ (.display-chip) と同等のサイズ・コントラストを保ちつつ、
+   トグル状態の塗りつぶしとは区別したアウトライン基調にして視覚的に
+   グループ化されないようにする。位置は margin-left:auto で右寄せのまま。 */
 .btn-edit-mode {
   margin-left: auto;
   padding: 5px 16px;
   border-radius: 20px;
-  border: 1px solid rgba(230, 168, 23, 0.5);
-  background: var(--amber-glow);
+  border: 1.5px solid var(--amber);
+  background: transparent;
   color: var(--amber-light);
   font-family: inherit;
   font-size: 14px;
@@ -1911,9 +1912,8 @@ body::before {
 }
 
 .btn-edit-mode:hover {
-  border-color: var(--amber);
+  background: var(--amber-glow);
   color: var(--amber);
-  background: rgba(230, 168, 23, 0.18);
 }
 
 /* --- Player Detail Modal --- */
