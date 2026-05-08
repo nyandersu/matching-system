@@ -39,95 +39,213 @@ const PDF = {
   },
 
   /**
-   * html2pdf.js を使ってPDFを生成・ダウンロード
+   * 完全隔離 iframe 内で html2canvas + jsPDF を実行して PDF をダウンロード。
+   *
+   * 本体ページの CSS（body の radial-gradient 等）が html2canvas の
+   * canvas gradient 計算で non-finite 値を生み、無限ループや白紙化を
+   * 引き起こすため、iframe を完全に独立した document として扱い、
+   * その中で全ての PDF 描画ロジックを完結させる。
+   *
    * 印刷ダイアログは経由しない。
    */
   async _downloadPDF(contentHtml, filename) {
-    if (typeof html2pdf === 'undefined') {
+    if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
       alert('PDF生成ライブラリが読み込まれていません。ページを再読み込みしてください。');
       return;
     }
-    // html2canvas はレイアウト済みの DOM を必要とするため、画面外に
-    // 実寸（A4横幅相当）で描画用コンテナを生成する。
-    // padding/font は元 CSS に準拠。
-    const styleTag = `<style>
-      .__pdf_root__ * { box-sizing: border-box; margin: 0; padding: 0; }
-      .__pdf_root__ {
-        font-family: 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic', sans-serif;
+
+    const styleCss = `
+      *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { background: #fff; }
+      body {
+        font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif;
         font-size: 13px;
         color: #1a1a2e;
-        background: #fff;
         padding: 24px 28px;
         width: 794px;
       }
-      .__pdf_root__ h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
-      .__pdf_root__ .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
-      .__pdf_root__ h2 {
-        font-size: 15px;
-        margin: 20px 0 8px;
-        padding-bottom: 5px;
-        border-bottom: 2px solid #333;
-        color: #1a1a2e;
+      h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
+      .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
+      h2 {
+        font-size: 15px; margin: 20px 0 8px; padding-bottom: 5px;
+        border-bottom: 2px solid #333; color: #1a1a2e;
       }
-      .__pdf_root__ table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-      .__pdf_root__ th {
-        background: #2d2d44;
-        color: #fff;
-        font-size: 12px;
-        font-weight: 600;
-        padding: 8px 10px;
-        border: 1px solid #555;
+      table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+      th {
+        background: #2d2d44; color: #fff; font-size: 12px;
+        font-weight: 600; padding: 8px 10px; border: 1px solid #555;
         text-align: center;
       }
-      .__pdf_root__ td {
-        border: 1px solid #bbb;
-        padding: 7px 10px;
-        font-size: 12px;
-        text-align: center;
-        color: #1a1a2e;
-        background: #fff;
+      td {
+        border: 1px solid #bbb; padding: 7px 10px; font-size: 12px;
+        text-align: center; color: #1a1a2e; background: #fff;
       }
-      .__pdf_root__ tr:nth-child(even) td { background: #f5f5f5; }
-      .__pdf_root__ .name-td { text-align: left !important; }
-      .__pdf_root__ .win-td  { color: #8a5800; font-weight: bold; }
-      .__pdf_root__ .loss-td { color: #c0392b; }
-      .__pdf_root__ .pt-td   { font-weight: bold; color: #8a5800; }
-      .__pdf_root__ .rank-S  { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .__pdf_root__ .rank-A  { background:#e74c3c; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .__pdf_root__ .rank-B  { background:#3498db; color:#fff;    padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .__pdf_root__ .rank-C  { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
-      .__pdf_root__ .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
-    </style>`;
+      tr:nth-child(even) td { background: #f5f5f5; }
+      .name-td { text-align: left !important; }
+      .win-td { color: #8a5800; font-weight: bold; }
+      .loss-td { color: #c0392b; }
+      .pt-td { font-weight: bold; color: #8a5800; }
+      .rank-S { background:#ffd700; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-A { background:#e74c3c; color:#fff; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-B { background:#3498db; color:#fff; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .rank-C { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
+      .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
+    `;
 
-    // 既存のPDFコンテナがあれば削除
-    const existing = document.getElementById('__pdf_container__');
-    if (existing) existing.remove();
+    // 既存のレンダリング用 iframe があれば削除
+    const oldIf = document.getElementById('__pdf_iframe__');
+    if (oldIf) oldIf.remove();
 
-    const container = document.createElement('div');
-    container.id = '__pdf_container__';
-    container.className = '__pdf_root__';
-    container.style.position = 'absolute';
-    container.style.left = '-99999px';
-    container.style.top = '0';
-    container.style.zIndex = '-1';
-    container.innerHTML = styleTag + contentHtml;
-    document.body.appendChild(container);
+    const iframe = document.createElement('iframe');
+    iframe.id = '__pdf_iframe__';
+    iframe.setAttribute('aria-hidden', 'true');
+    // 視覚的に消す方法は html2canvas を妨げないものに限定する。
+    // - opacity:0 や position:fixed top/left:0 は html2canvas の無限ループを誘発した
+    // - そのため、ページ末尾に追加（normal flow）し、サイズは 0×0 で可視 0 にする
+    // iframe を 0x0 や visibility:hidden にすると rendering pipeline が止まり
+    // 中の requestAnimationFrame / html2canvas が動作しなくなる。
+    // 視認上は見えないが正の寸法を持つよう、極小サイズで画面右下に配置する。
+    iframe.style.cssText = `
+      width: 800px; height: 1px; border: 0;
+      position: fixed; right: 0; bottom: 0;
+      overflow: hidden;
+      pointer-events: none;
+    `;
+    document.body.appendChild(iframe);
 
     try {
-      await html2pdf().set({
-        margin:      [10, 10, 10, 10],
-        filename,
-        image:       { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak:   { mode: ['avoid-all', 'css', 'legacy'] },
-      }).from(container).save();
+      const blob = await this._renderPdfInIframe(iframe, contentHtml, styleCss);
+      // ダウンロードトリガー
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Blob URL のクリーンアップは少し遅らせる（Safari 対策）
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       console.error('[PDF] generation failed:', e);
       alert('PDFの生成に失敗しました: ' + (e.message || e));
     } finally {
-      if (container.parentNode) container.parentNode.removeChild(container);
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
     }
+  },
+
+  /**
+   * iframe 内に html2canvas + jsPDF を再ロードして、その中で完結する形で
+   * PDF blob を生成する。本体ページの CSS の影響を完全に遮断するため、
+   * ライブラリ自体も iframe 内で読み込み直す。
+   * 完了したら postMessage で blob を親に返す。
+   */
+  _renderPdfInIframe(iframe, contentHtml, styleCss) {
+    const reqId = '__pdf_req_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+
+    return new Promise((resolve, reject) => {
+      const TIMEOUT_MS = 20000;
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        reject(new Error('PDF生成がタイムアウトしました'));
+      }, TIMEOUT_MS);
+
+      const onMessage = (ev) => {
+        if (ev.source !== iframe.contentWindow) return;
+        const data = ev.data;
+        if (!data || data.__pdfReq !== reqId) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        if (data.ok && data.blob) resolve(data.blob);
+        else reject(new Error(data.error || '不明なエラー'));
+      };
+      window.addEventListener('message', onMessage);
+
+      // iframe document を構築
+      const idoc = iframe.contentDocument || iframe.contentWindow.document;
+      idoc.open();
+      idoc.write(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>pdf</title>
+<style>${styleCss}</style>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous"></scr` + `ipt>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js" crossorigin="anonymous"></scr` + `ipt>
+</head>
+<body>${contentHtml}<scr` + `ipt>
+(async function () {
+  const send = (msg) => parent.postMessage(Object.assign({ __pdfReq: ${JSON.stringify(reqId)} }, msg), '*');
+  try {
+    if (typeof html2canvas === 'undefined') throw new Error('html2canvas not loaded in iframe');
+    if (typeof window.jspdf === 'undefined') throw new Error('jspdf not loaded in iframe');
+    // フォント読込待ちは最大2秒に制限（iframeで永遠にpending状態が起こりうる）
+    if (document.fonts && document.fonts.ready) {
+      try {
+        await Promise.race([
+          document.fonts.ready,
+          new Promise(r => setTimeout(r, 2000))
+        ]);
+      } catch (_) {}
+    }
+    // setTimeout で1tick遅らせる（極小iframeでは requestAnimationFrame が発火しないため）
+    await new Promise(r => setTimeout(r, 50));
+
+    const canvas = await html2canvas(document.body, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      windowWidth: document.documentElement.scrollWidth,
+      windowHeight: document.documentElement.scrollHeight,
+    });
+    if (!canvas || canvas.width === 0 || canvas.height === 0) {
+      throw new Error('canvas size invalid: ' + canvas?.width + 'x' + canvas?.height);
+    }
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const imgW = pageW - margin * 2;
+    const imgH = canvas.height * imgW / canvas.width;
+
+    if (imgH <= pageH - margin * 2) {
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, imgH);
+    } else {
+      const pageContentH = pageH - margin * 2;
+      const pxPerMm = canvas.width / imgW;
+      const sliceHeightPx = Math.floor(pageContentH * pxPerMm);
+      let cursor = 0;
+      let first = true;
+      while (cursor < canvas.height) {
+        const remaining = canvas.height - cursor;
+        const sliceH = Math.min(sliceHeightPx, remaining);
+        const slice = document.createElement('canvas');
+        slice.width = canvas.width;
+        slice.height = sliceH;
+        const sctx = slice.getContext('2d');
+        sctx.fillStyle = '#ffffff';
+        sctx.fillRect(0, 0, slice.width, slice.height);
+        sctx.drawImage(canvas, 0, -cursor);
+        const sliceMm = sliceH / pxPerMm;
+        if (!first) pdf.addPage();
+        pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, sliceMm);
+        first = false;
+        cursor += sliceH;
+      }
+    }
+
+    const blob = pdf.output('blob');
+    send({ ok: true, blob });
+  } catch (e) {
+    send({ ok: false, error: e.message || String(e) });
+  }
+})();
+</scr` + `ipt></body>
+</html>`);
+      idoc.close();
+    });
   },
 
   /**
