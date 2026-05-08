@@ -1892,17 +1892,19 @@ body::before {
   color: var(--amber-light);
 }
 
-/* 手動編集ボタン（display-opts-bar 内） */
+/* 手動編集ボタン（display-opts-bar 内）
+   表示項目チップ (.display-chip) と同等以上に視認しやすくするため、
+   サイズ・コントラストを揃える */
 .btn-edit-mode {
   margin-left: auto;
-  padding: 4px 12px;
+  padding: 5px 16px;
   border-radius: 20px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid rgba(230, 168, 23, 0.5);
+  background: var(--amber-glow);
+  color: var(--amber-light);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   transition: var(--transition-fast);
   white-space: nowrap;
@@ -1910,8 +1912,8 @@ body::before {
 
 .btn-edit-mode:hover {
   border-color: var(--amber);
-  color: var(--amber-light);
-  background: var(--amber-glow);
+  color: var(--amber);
+  background: rgba(230, 168, 23, 0.18);
 }
 
 /* --- Player Detail Modal --- */
