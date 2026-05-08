@@ -90,6 +90,7 @@ const PDF = {
       .rank-B { background:#3498db; color:#fff; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
       .rank-C { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
       .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
+      .pdf-round { display: block; }
     `;
 
     // 既存のレンダリング用 iframe があれば削除
@@ -190,8 +191,18 @@ const PDF = {
     // setTimeout で1tick遅らせる（極小iframeでは requestAnimationFrame が発火しないため）
     await new Promise(r => setTimeout(r, 50));
 
+    // 「跨いではいけないブロック」（.pdf-round）の document 内 Y 範囲を採取。
+    // html2canvas でレンダリングする前に取得する（DOM 構造はその時点で確定済み）。
+    const SCALE = 2;
+    const blocks = [];
+    document.querySelectorAll('.pdf-round').forEach(el => {
+      const r = el.getBoundingClientRect();
+      // iframe document 内の coords。スクロールしてないので rect そのままで OK。
+      blocks.push({ topPx: r.top * SCALE, bottomPx: r.bottom * SCALE });
+    });
+
     const canvas = await html2canvas(document.body, {
-      scale: 2,
+      scale: SCALE,
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: false,
@@ -210,29 +221,54 @@ const PDF = {
     const imgW = pageW - margin * 2;
     const imgH = canvas.height * imgW / canvas.width;
 
+    // 1ページに収まる場合はそのまま貼り付け
     if (imgH <= pageH - margin * 2) {
       pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, imgH);
     } else {
       const pageContentH = pageH - margin * 2;
-      const pxPerMm = canvas.width / imgW;
-      const sliceHeightPx = Math.floor(pageContentH * pxPerMm);
+      const pxPerMm      = canvas.width / imgW;
+      const pageHeightPx = Math.floor(pageContentH * pxPerMm);
+
+      // ページ境界候補 = 各ブロックの bottom と canvas 末尾。これらでのみ改ページ。
+      // ブロックが無い（成績表など）場合は通常スライス。
+      const breakpoints = blocks.map(b => Math.round(b.bottomPx)).sort((a, b) => a - b);
+      breakpoints.push(canvas.height);
+
+      // ページ分割：cursor から先に進める際、breakpoints の中で
+      // (cursor, cursor + pageHeightPx] の範囲にある最大のものを採用。
+      // 該当なし（= 単一ブロックがページに収まらない）の場合のみ pageHeightPx で強制分割。
       let cursor = 0;
-      let first = true;
+      let first  = true;
       while (cursor < canvas.height) {
-        const remaining = canvas.height - cursor;
-        const sliceH = Math.min(sliceHeightPx, remaining);
+        const limit = cursor + pageHeightPx;
+        let sliceEnd = -1;
+        for (const bp of breakpoints) {
+          if (bp > cursor && bp <= limit) {
+            sliceEnd = bp;
+          } else if (bp > limit) {
+            break;
+          }
+        }
+        if (sliceEnd === -1) {
+          // どのブロック境界もページ高さに収まらない → 強制スライス
+          sliceEnd = Math.min(limit, canvas.height);
+        }
+        const sliceH = sliceEnd - cursor;
+        if (sliceH <= 0) break; // 安全網
+
         const slice = document.createElement('canvas');
-        slice.width = canvas.width;
+        slice.width  = canvas.width;
         slice.height = sliceH;
         const sctx = slice.getContext('2d');
         sctx.fillStyle = '#ffffff';
         sctx.fillRect(0, 0, slice.width, slice.height);
         sctx.drawImage(canvas, 0, -cursor);
         const sliceMm = sliceH / pxPerMm;
+
         if (!first) pdf.addPage();
         pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', margin, margin, imgW, sliceMm);
-        first = false;
-        cursor += sliceH;
+        first  = false;
+        cursor = sliceEnd;
       }
     }
 
@@ -275,7 +311,10 @@ const PDF = {
       <p class="subtitle">生成日: ${new Date().toLocaleDateString('ja-JP')}</p>`;
 
     rounds.forEach(round => {
-      html += `<h2>第${round.roundNumber}回戦</h2>
+      // 各回戦を section でラップ。PDF生成時に section 境界でページ分割し、
+      // 一つの回戦が複数ページに跨ぐのを防ぐ。
+      html += `<section class="pdf-round">
+        <h2>第${round.roundNumber}回戦</h2>
         <table>
           <thead>
             <tr>
@@ -308,6 +347,8 @@ const PDF = {
         const meta = showGrade ? `（${this._esc(p.grade)}年）` : '';
         html += `<p class="bye-note">不戦勝: ${this._esc(p.name)}${meta}</p>`;
       }
+
+      html += `</section>`;
     });
 
     return html;

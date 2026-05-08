@@ -825,6 +825,15 @@ const UI = {
     const playerMap = {};
     players.forEach(p => playerMap[p.id] = p);
 
+    // ヒント文を「先後あり/なし」で切り替え
+    const showSenteGote = parseInt(document.getElementById('sente-gote-weight')?.value ?? '1') === 1;
+    const hintEl = document.getElementById('results-hint');
+    if (hintEl) {
+      hintEl.innerHTML = showSenteGote
+        ? '各対局の結果を入力してください。左側の <strong>○</strong> は先手（左）の勝ち、右側の <strong>○</strong> は後手（右）の勝ち、<strong>△</strong> は引き分けです。'
+        : '各対局の結果を入力してください。左側の <strong>○</strong> は左側の選手の勝ち、右側の <strong>○</strong> は右側の選手の勝ち、<strong>△</strong> は引き分けです。';
+    }
+
     if (rounds.length === 0) {
       container.innerHTML = `
         <div class="empty-state">
@@ -1106,16 +1115,21 @@ const UI = {
           </div>
         </div>`).join('');
 
+    // 先後指定なしの場合は「先後」列を非表示
+    const showSenteGote = parseInt(document.getElementById('sente-gote-weight')?.value ?? '1') === 1;
+
     const historyRowsHtml = history.length === 0
       ? '<p class="pd-empty">対戦データがありません</p>'
       : history.map(h => {
           if (h.type === 'bye') return `
             <tr>
               <td class="pd-round">第${h.roundNumber}回戦</td>
-              <td colspan="2" class="pd-bye-cell">— 空き手合い —</td>
+              <td ${showSenteGote ? 'colspan="2"' : ''} class="pd-bye-cell">— 空き手合い —</td>
               <td>${resultBadge('bye')}</td>
             </tr>`;
-          const sideLabel = h.side === 'player1' ? '<span class="pd-side sente">先手</span>' : '<span class="pd-side gote">後手</span>';
+          const sideLabel = showSenteGote
+            ? (h.side === 'player1' ? '<span class="pd-side sente">先手</span>' : '<span class="pd-side gote">後手</span>')
+            : '';
           return `
             <tr>
               <td class="pd-round">第${h.roundNumber}回戦</td>
@@ -1123,7 +1137,7 @@ const UI = {
                 <span class="pd-opp-name">${this.escapeHtml(h.opponentName)}</span>
                 <span class="pd-opp-meta">${h.opponentGrade}年 <span class="rank-badge rank-${h.opponentRank}" style="font-size:10px;padding:1px 5px;">${h.opponentRank}</span></span>
               </td>
-              <td>${sideLabel}</td>
+              ${showSenteGote ? `<td>${sideLabel}</td>` : ''}
               <td>${resultBadge(h.result)}</td>
             </tr>`;
         }).join('');
@@ -1160,7 +1174,7 @@ const UI = {
         <h3 class="pd-section-title">対戦履歴</h3>
         <table class="pd-history-table">
           <thead>
-            <tr><th>回戦</th><th>対戦相手</th><th>先後</th><th>結果</th></tr>
+            <tr><th>回戦</th><th>対戦相手</th>${showSenteGote ? '<th>先後</th>' : ''}<th>結果</th></tr>
           </thead>
           <tbody>${historyRowsHtml}</tbody>
         </table>
