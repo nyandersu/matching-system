@@ -68,9 +68,13 @@ const Matching = {
 
         if (!result) { success = false; break; }
 
-        // 先後割り当て
+        // 先後割り当て：今ラウンドの BYE 決定を反映した byeCounts を渡し、
+        // 不戦勝のある選手の目標 (floor((numRounds-bye)/2)) に近づくよう
+        // 重み付き貪欲で初期割り当て。最終最適化は全ラウンド生成後に行う。
         if (assignSenteGote) {
-          result.matches = this._assignSenteGote(result.matches, senteHistory);
+          const effectiveByeCounts = { ...byeCounts };
+          if (result.byePlayerId) effectiveByeCounts[result.byePlayerId] = (effectiveByeCounts[result.byePlayerId] ?? 0) + 1;
+          result.matches = this._assignSenteGote(result.matches, senteHistory, effectiveByeCounts, numRounds);
         }
 
         allRounds.push(result);
@@ -92,7 +96,16 @@ const Matching = {
         if (result.byePlayerId) byeCounts[result.byePlayerId]++;
       }
 
-      if (success) return { rounds: allRounds };
+      if (success) {
+        // 全ラウンド生成後の最終パス：不戦勝のある選手の先後カウントを
+        // 「先手 floor(playedGames/2) 回」に揃える。
+        // 例：6回戦・1回不戦勝 → 5局のうち先手2回・後手3回。
+        // この目標は不戦勝のない選手の均等化よりも優先される（重み付け）。
+        if (assignSenteGote) {
+          this._optimizeSenteGote(allRounds, players, byeCounts, numRounds);
+        }
+        return { rounds: allRounds };
+      }
     }
 
     return { error: 'マッチングの生成に失敗しました。プレイヤー数とラウンド数の組み合わせを見直してください。' };
@@ -178,7 +191,12 @@ const Matching = {
       return { error: 'スイスドローの生成に失敗しました。' };
     }
 
-    // 先後割り当て
+    // 先後割り当て：今ラウンドのBYE決定を反映した byeCounts を渡し、
+    // 不戦勝あり選手の目標先手回数 (floor((numRounds-bye)/2)) を優先する
+    const effectiveByeCounts = { ...byeCounts };
+    if (bestByeId) effectiveByeCounts[bestByeId] = (effectiveByeCounts[bestByeId] ?? 0) + 1;
+    const swissNumRounds = options.numRounds ?? null;
+
     const assignedPairs = assignSenteGote
       ? this._assignSenteGote(
           bestPairs.map(([p1, p2]) => ({
@@ -188,7 +206,9 @@ const Matching = {
             player2Rank: p2.rank, player2Grade: p2.grade,
             result: null
           })),
-          senteHistory
+          senteHistory,
+          effectiveByeCounts,
+          swissNumRounds
         )
       : bestPairs.map(([p1, p2]) => ({
           player1Id: p1.id, player1Name: p1.name,
@@ -208,23 +228,233 @@ const Matching = {
   },
 
   /**
-   * 先後均等化：各マッチに先手・後手を割り当てる
-   * match オブジェクト（player1Id/player2Id等を持つ）の配列を受け取り、
-   * 先手回数が少ない方を player1（先手）にして返す
+   * 全ラウンド生成後の先後最適化。
+   *
+   * ルール：
+   * - 各選手の目標先手回数 = floor(対局数 / 2)
+   *   - 6回戦・1回不戦勝 → 5局 → 先手2回・後手3回
+   *   - 6回戦・不戦勝なし → 6局 → 先手3回・後手3回
+   * - 不戦勝のある選手の目標達成を「不戦勝のない選手の均等化」よりも優先する
+   *   （重み 1000 倍で評価）
+   *
+   * 単一の入れ替え（1-flip）では局所最適に陥るため、
+   *   - 試合ペアを同時に入れ替える 2-flip
+   *   - ランダム初期化からの多重リスタート
+   * を組み合わせて最良解を探索する。
    */
-  _assignSenteGote(matches, senteHistory) {
+  _optimizeSenteGote(rounds, players, byeCounts, numRounds) {
+    // 目標先手回数
+    const target = {};
+    const isBye  = {};
+    players.forEach(p => {
+      const bye = byeCounts[p.id] ?? 0;
+      target[p.id] = Math.floor((numRounds - bye) / 2);
+      isBye[p.id]  = bye > 0;
+    });
+    const weightOf = (id) => isBye[id] ? 1000 : 1;
+
+    // 全ての試合への参照を平坦化
+    const allMatches = [];
+    rounds.forEach(r => r.matches.forEach(m => allMatches.push(m)));
+    if (allMatches.length === 0) return;
+
+    // 入れ替え操作（in place + result反転）
+    const flipMatch = (m) => {
+      const t = {
+        player1Id:    m.player1Id,    player2Id:    m.player2Id,
+        player1Name:  m.player1Name,  player2Name:  m.player2Name,
+        player1Grade: m.player1Grade, player2Grade: m.player2Grade,
+        player1Rank:  m.player1Rank,  player2Rank:  m.player2Rank,
+      };
+      m.player1Id    = t.player2Id;    m.player2Id    = t.player1Id;
+      m.player1Name  = t.player2Name;  m.player2Name  = t.player1Name;
+      m.player1Grade = t.player2Grade; m.player2Grade = t.player1Grade;
+      m.player1Rank  = t.player2Rank;  m.player2Rank  = t.player1Rank;
+      if (m.result === 'player1') m.result = 'player2';
+      else if (m.result === 'player2') m.result = 'player1';
+    };
+
+    // senteCount を集計
+    const buildSenteCount = () => {
+      const sc = {};
+      players.forEach(p => { sc[p.id] = 0; });
+      allMatches.forEach(m => { sc[m.player1Id]++; });
+      return sc;
+    };
+
+    // 全選手の総合エラー
+    const totalError = (sc) => {
+      let sum = 0;
+      for (const p of players) {
+        const dev = sc[p.id] - target[p.id];
+        sum += weightOf(p.id) * dev * dev;
+      }
+      return sum;
+    };
+
+    // 1-flip + 2-flip + 3-flip（必要時のみ）を収束まで反復
+    // 時間予算でカット：大規模構成での暴走防止
+    const localSearch = (deadline) => {
+      const sc = buildSenteCount();
+
+      const evalFlipSet = (matches) => {
+        const delta = {};
+        matches.forEach(m => {
+          delta[m.player1Id] = (delta[m.player1Id] ?? 0) - 1;
+          delta[m.player2Id] = (delta[m.player2Id] ?? 0) + 1;
+        });
+        let before = 0, after = 0;
+        for (const id in delta) {
+          const d = delta[id];
+          if (d === 0) continue;
+          const cur  = sc[id] - target[id];
+          const newD = cur + d;
+          before += weightOf(id) * cur * cur;
+          after  += weightOf(id) * newD * newD;
+        }
+        if (after < before) {
+          matches.forEach(m => flipMatch(m));
+          for (const id in delta) sc[id] += delta[id];
+          return true;
+        }
+        return false;
+      };
+
+      const checkTimeout = () => deadline != null && Date.now() > deadline;
+
+      let improved = true;
+      let guard = 0;
+      while (improved && guard < 200) {
+        improved = false;
+        guard++;
+        if (checkTimeout()) break;
+
+        // --- 1-flip ---
+        for (const m of allMatches) {
+          if (evalFlipSet([m])) improved = true;
+        }
+
+        // --- 2-flip ---
+        for (let i = 0; i < allMatches.length; i++) {
+          if (checkTimeout()) break;
+          for (let j = i + 1; j < allMatches.length; j++) {
+            if (evalFlipSet([allMatches[i], allMatches[j]])) improved = true;
+          }
+        }
+
+        // --- 3-flip（1-flip / 2-flip で改善がなく、かつエラーが残る場合のみ） ---
+        if (!improved && totalError(sc) > 0) {
+          outer3:
+          for (let i = 0; i < allMatches.length; i++) {
+            if (checkTimeout()) break;
+            for (let j = i + 1; j < allMatches.length; j++) {
+              for (let k = j + 1; k < allMatches.length; k++) {
+                if (evalFlipSet([allMatches[i], allMatches[j], allMatches[k]])) {
+                  improved = true;
+                  break outer3;
+                }
+              }
+            }
+          }
+        }
+      }
+      return totalError(sc);
+    };
+
+    // ランダムリスタート：初期状態を変えて複数回試し最良を採用
+    const snapshot = () => allMatches.map(m => ({
+      a: m.player1Id, b: m.player2Id, an: m.player1Name, bn: m.player2Name,
+      ag: m.player1Grade, bg: m.player2Grade, ar: m.player1Rank, br: m.player2Rank,
+      r: m.result,
+    }));
+    const restoreFrom = (snap) => allMatches.forEach((m, i) => {
+      const s = snap[i];
+      m.player1Id = s.a; m.player2Id = s.b;
+      m.player1Name = s.an; m.player2Name = s.bn;
+      m.player1Grade = s.ag; m.player2Grade = s.bg;
+      m.player1Rank = s.ar; m.player2Rank = s.br;
+      m.result = s.r;
+    });
+
+    // 全体の時間予算（合計で 1.5 秒）
+    const overallDeadline = Date.now() + 1500;
+
+    // 1回目：現状から localSearch
+    let bestSnap  = snapshot();
+    let bestError = localSearch(overallDeadline);
+    bestSnap = snapshot();
+    if (bestError === 0) { restoreFrom(bestSnap); return; }
+
+    // 構造化リスタート：不戦勝なし選手を試合内で先手にする初期状態
+    const structuredRestart = () => {
+      allMatches.forEach(m => {
+        const b1 = isBye[m.player1Id];
+        const b2 = isBye[m.player2Id];
+        if (b1 && !b2) flipMatch(m);
+      });
+    };
+
+    structuredRestart();
+    let e = localSearch(overallDeadline);
+    if (e < bestError) { bestError = e; bestSnap = snapshot(); }
+    if (bestError === 0) { restoreFrom(bestSnap); return; }
+
+    // ランダム初期化での再試行（時間予算が許す限り）
+    let restarts = 0;
+    while (Date.now() < overallDeadline && restarts < 200) {
+      restarts++;
+      allMatches.forEach(m => { if (Math.random() < 0.5) flipMatch(m); });
+      e = localSearch(overallDeadline);
+      if (e < bestError) {
+        bestError = e;
+        bestSnap  = snapshot();
+        if (bestError === 0) break;
+      }
+    }
+    restoreFrom(bestSnap);
+  },
+
+  /**
+   * 先後均等化：各マッチに先手・後手を割り当てる
+   * 引数 byeCounts/numRounds が与えられると、不戦勝あり選手を優先して
+   * 目標先手回数 (= floor((numRounds-bye)/2)) に合わせる重み付けを行う。
+   * generateAllRounds は最終パスで _optimizeSenteGote を実行するため、
+   * 主に Swiss draw（逐次生成）でこの強化版を使う。
+   */
+  _assignSenteGote(matches, senteHistory, byeCounts = null, numRounds = null) {
+    const swap = (m) => ({
+      player1Id:    m.player2Id,    player2Id:    m.player1Id,
+      player1Name:  m.player2Name,  player2Name:  m.player1Name,
+      player1Rank:  m.player2Rank,  player2Rank:  m.player1Rank,
+      player1Grade: m.player2Grade, player2Grade: m.player1Grade,
+      result: null,
+    });
+
     return matches.map(match => {
       const s1 = senteHistory[match.player1Id] ?? 0;
       const s2 = senteHistory[match.player2Id] ?? 0;
-      // player1 の先手回数が多い場合は先後を入れ替え
+
+      if (byeCounts && numRounds) {
+        // 目標先手回数（不戦勝考慮）
+        const b1 = byeCounts[match.player1Id] ?? 0;
+        const b2 = byeCounts[match.player2Id] ?? 0;
+        const t1 = Math.floor((numRounds - b1) / 2);
+        const t2 = Math.floor((numRounds - b2) / 2);
+        // 不戦勝のある選手は重み 1000（最優先）
+        const w1 = b1 > 0 ? 1000 : 1;
+        const w2 = b2 > 0 ? 1000 : 1;
+        // p1 が先手の場合と p2 が先手の場合のエラーを比較
+        const errIfP1 = w1*(s1+1-t1)*(s1+1-t1) + w2*(s2-t2)*(s2-t2);
+        const errIfP2 = w1*(s1-t1)*(s1-t1)     + w2*(s2+1-t2)*(s2+1-t2);
+        if (errIfP1 > errIfP2 || (errIfP1 === errIfP2 && Math.random() < 0.5)) {
+          return swap(match);
+        }
+        return { ...match, result: null };
+      }
+
+      // 単純な均等化（後方互換）
       if (s1 > s2 || (s1 === s2 && Math.random() < 0.5)) {
-        return {
-          player1Id:    match.player2Id,    player2Id:    match.player1Id,
-          player1Name:  match.player2Name,  player2Name:  match.player1Name,
-          player1Rank:  match.player2Rank,  player2Rank:  match.player1Rank,
-          player1Grade: match.player2Grade, player2Grade: match.player1Grade,
-          result: null
-        };
+        return swap(match);
       }
       return { ...match, result: null };
     });
