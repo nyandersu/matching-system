@@ -637,7 +637,7 @@ body::before {
 .player-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 1em; /* 名前と学年・ランクの間を一文字分空ける */
 }
 
 .match-player.player1 .player-info {
@@ -650,8 +650,8 @@ body::before {
 }
 
 .player-grade-text {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .match-player.winner {
@@ -719,7 +719,7 @@ body::before {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 1em; /* 名前と学年・ランクの間を一文字分空ける */
   font-size: 14px;
 }
 
@@ -1317,8 +1317,8 @@ body::before {
 
 .result-player-meta {
   display: block;
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
   margin-top: 1px;
 }
 
@@ -1892,26 +1892,28 @@ body::before {
   color: var(--amber-light);
 }
 
-/* 手動編集ボタン（display-opts-bar 内） */
+/* 手動編集ボタン（display-opts-bar 内）
+   表示項目チップ (.display-chip) と同等のサイズ・コントラストを保ちつつ、
+   トグル状態の塗りつぶしとは区別したアウトライン基調にして視覚的に
+   グループ化されないようにする。位置は margin-left:auto で右寄せのまま。 */
 .btn-edit-mode {
   margin-left: auto;
-  padding: 4px 12px;
+  padding: 5px 16px;
   border-radius: 20px;
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--amber);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--amber-light);
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
   transition: var(--transition-fast);
   white-space: nowrap;
 }
 
 .btn-edit-mode:hover {
-  border-color: var(--amber);
-  color: var(--amber-light);
   background: var(--amber-glow);
+  color: var(--amber);
 }
 
 /* --- Player Detail Modal --- */
