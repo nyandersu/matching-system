@@ -298,6 +298,17 @@ const UI = {
     const leagueBtn = document.getElementById('tab-btn-league');
     if (leagueBtn) leagueBtn.classList.remove('hidden');
 
+    // リーグ戦モードではランクを使わないため、選手登録フォームの
+    // ランク欄を隠す（hidden な required はフォーム送信を妨げるため
+    // required も外す）
+    const rankGroup  = document.getElementById('player-rank-group');
+    const rankSelect = document.getElementById('player-rank');
+    if (rankGroup)  rankGroup.classList.toggle('hidden', enabled);
+    if (rankSelect) {
+      if (enabled) rankSelect.removeAttribute('required');
+      else         rankSelect.setAttribute('required', '');
+    }
+
     // リーグ有効化でトーナメントタブが隠れた場合、そのタブにいたらリーグ戦へ退避
     const activePanel = document.querySelector('.tab-panel.active');
     const activeId = activePanel ? activePanel.id.replace('tab-', '') : 'players';
@@ -356,7 +367,18 @@ const UI = {
   handlePlayerSubmit() {
     const name = document.getElementById('player-name').value.trim();
     const grade = parseInt(document.getElementById('player-grade').value);
-    const rank = document.getElementById('player-rank').value;
+
+    // リーグ戦モードではランクを使わない。
+    // 編集時は既存ランクを保持、新規はプレースホルダ 'C'。
+    const leagueMode = !!(AppStorage.getLeague() || {}).enabled;
+    let rank;
+    if (leagueMode) {
+      rank = this.editingPlayerId
+        ? (AppStorage.getPlayers().find(p => p.id === this.editingPlayerId)?.rank || 'C')
+        : 'C';
+    } else {
+      rank = document.getElementById('player-rank').value;
+    }
 
     if (!name) {
       this.showToast('名前を入力してください', 'error');
@@ -431,6 +453,9 @@ const UI = {
       return;
     }
 
+    // リーグ戦モードではランクを使わない
+    const leagueMode = !!(AppStorage.getLeague() || {}).enabled;
+
     // 学年→ランク順にソート
     const sorted = [...players].sort((a, b) => {
       if (a.grade !== b.grade) return a.grade - b.grade;
@@ -445,7 +470,7 @@ const UI = {
             <tr>
               <th>名前</th>
               <th>学年</th>
-              <th>ランク</th>
+              ${leagueMode ? '' : '<th>ランク</th>'}
               <th>操作</th>
             </tr>
           </thead>
@@ -454,7 +479,7 @@ const UI = {
               <tr>
                 <td class="player-name-cell">${this.escapeHtml(p.name)}</td>
                 <td>${p.grade}年</td>
-                <td><span class="rank-badge rank-${p.rank}">${p.rank}</span></td>
+                ${leagueMode ? '' : `<td><span class="rank-badge rank-${p.rank}">${p.rank}</span></td>`}
                 <td class="actions-cell">
                   <button class="btn-icon btn-edit" onclick="UI.editPlayer('${p.id}')" title="編集">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -483,10 +508,11 @@ const UI = {
           <span class="stat-label">学年分布:</span>
           ${Object.entries(gradeStats).sort((a,b) => a[0]-b[0]).map(([g, c]) => `<span class="stat-chip">${g}年: ${c}人</span>`).join('')}
         </div>
+        ${leagueMode ? '' : `
         <div class="stat-group">
           <span class="stat-label">ランク分布:</span>
           ${Object.entries(rankStats).filter(([,c]) => c > 0).map(([r, c]) => `<span class="stat-chip rank-${r}">${r}: ${c}人</span>`).join('')}
-        </div>
+        </div>`}
       </div>`;
 
     container.innerHTML += statsHtml;
