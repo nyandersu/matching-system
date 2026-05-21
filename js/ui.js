@@ -154,23 +154,7 @@ const UI = {
     overlay.classList.remove('hidden');
 
     // 最近使った部屋を表示
-    const history = AppStorage.getRoomHistory();
-    if (history.length > 0) {
-      const section = document.getElementById('room-history-section');
-      const list    = document.getElementById('room-history-list');
-      section.classList.remove('hidden');
-      list.innerHTML = history.map(r => `
-        <button class="room-history-item" data-room="${r}">
-          <span class="room-history-code">${r}</span>
-          <span class="room-history-arrow">→</span>
-        </button>
-      `).join('');
-      list.querySelectorAll('.room-history-item').forEach(btn => {
-        btn.addEventListener('click', () => {
-          this._enterRoom(btn.dataset.room);
-        });
-      });
-    }
+    this._renderRoomHistory();
 
     // 新規作成ボタン
     document.getElementById('room-create-btn').addEventListener('click', () => {
@@ -194,6 +178,46 @@ const UI = {
       e.target.value = e.target.value.toUpperCase();
       e.target.setSelectionRange(pos, pos);
     });
+  },
+
+  /** 最近使った部屋リストを描画（入室・削除ボタン付き） */
+  _renderRoomHistory() {
+    const history = AppStorage.getRoomHistory();
+    const section = document.getElementById('room-history-section');
+    const list    = document.getElementById('room-history-list');
+    if (!section || !list) return;
+
+    if (history.length === 0) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+    list.innerHTML = history.map(r => `
+      <div class="room-history-item">
+        <button class="room-history-enter" data-room="${this.escapeHtml(r)}">
+          <span class="room-history-code">${this.escapeHtml(r)}</span>
+          <span class="room-history-arrow">→</span>
+        </button>
+        <button class="room-history-delete" data-room="${this.escapeHtml(r)}" title="この部屋を削除">✕</button>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.room-history-enter').forEach(btn => {
+      btn.addEventListener('click', () => this._enterRoom(btn.dataset.room));
+    });
+    list.querySelectorAll('.room-history-delete').forEach(btn => {
+      btn.addEventListener('click', () => this._deleteRoom(btn.dataset.room));
+    });
+  },
+
+  /** 部屋を削除（確認あり） */
+  _deleteRoom(roomId) {
+    const msg = `部屋「${roomId}」を削除しますか？\n\n`
+      + 'この部屋の選手・対戦表・リーグ戦データがすべて削除され、元に戻せません。';
+    if (!confirm(msg)) return;
+    AppStorage.deleteRoom(roomId);
+    this._renderRoomHistory();
+    this.showToast(`部屋「${roomId}」を削除しました`, 'info');
   },
 
   _joinRoomFromInput() {
@@ -258,8 +282,9 @@ const UI = {
 
   /**
    * リーグ戦モードに応じてタブの表示を切り替える。
-   * - league.enabled=true  : マッチング/結果入力/成績表 を隠し、リーグ戦タブを表示
-   * - league.enabled=false : リーグ戦タブを隠し、通常タブを表示
+   * - リーグ戦タブは常に表示（無効時はイントロ＝開始ボタンを表示するため）
+   * - league.enabled=true  : マッチング/結果入力/成績表 を隠す
+   * - league.enabled=false : 通常タブをすべて表示
    * 選手管理タブは両モード共通で常に表示。
    */
   applyLeagueMode() {
@@ -269,16 +294,15 @@ const UI = {
       const btn = document.getElementById(`tab-btn-${t}`);
       if (btn) btn.classList.toggle('hidden', enabled);
     });
+    // リーグ戦タブは常に見えるようにする（モード開始の入口を兼ねる）
     const leagueBtn = document.getElementById('tab-btn-league');
-    if (leagueBtn) leagueBtn.classList.toggle('hidden', !enabled);
+    if (leagueBtn) leagueBtn.classList.remove('hidden');
 
-    // 現在表示中のタブが隠された場合は安全なタブへ退避
+    // リーグ有効化でトーナメントタブが隠れた場合、そのタブにいたらリーグ戦へ退避
     const activePanel = document.querySelector('.tab-panel.active');
     const activeId = activePanel ? activePanel.id.replace('tab-', '') : 'players';
     if (enabled && tournamentTabs.includes(activeId)) {
       this.showTab('league');
-    } else if (!enabled && activeId === 'league') {
-      this.showTab('players');
     }
   },
 
