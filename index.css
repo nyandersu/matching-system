@@ -2369,18 +2369,23 @@ body::before {
   font-weight: 600;
   font-family: inherit;
   color: var(--text-primary);
-  background: transparent;
-  border: 1px solid transparent;
+  /* 編集可能と分かるよう、入力欄として明示する（タッチ端末はhover不可のため） */
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 5px 8px;
+  padding: 5px 26px 5px 8px;
+  /* 右端に鉛筆アイコンを背景表示 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239b97b0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
 }
 .league-class-name-input:hover {
-  border-color: var(--border);
+  border-color: var(--amber);
 }
 .league-class-name-input:focus {
   outline: none;
   border-color: var(--border-focus);
-  background: rgba(0, 0, 0, 0.2);
+  background-color: rgba(0, 0, 0, 0.35);
 }
 .league-class-count {
   flex-shrink: 0;
