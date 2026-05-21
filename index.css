@@ -2250,3 +2250,525 @@ body::before {
 
 /* hidden utility */
 .hidden { display: none !important; }
+
+/* ============================================
+   リーグ戦モード
+   ============================================ */
+
+/* 未開始時の案内 */
+.league-intro {
+  text-align: center;
+  padding: 48px 24px;
+}
+.league-intro .empty-icon {
+  font-size: 56px;
+  margin-bottom: 12px;
+}
+.league-intro-title {
+  font-size: 22px;
+  color: var(--amber-light);
+  margin-bottom: 12px;
+}
+.league-intro-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  margin-bottom: 24px;
+}
+
+/* ヘッダー */
+.league-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.league-term-badge {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border: 1px solid rgba(230, 168, 23, 0.4);
+  border-radius: 20px;
+  padding: 6px 18px;
+}
+
+/* セクション補足文 */
+.league-section-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.league-empty-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 16px 4px;
+  text-align: center;
+}
+
+/* 階級リスト */
+.league-class-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.league-class-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-class-order {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-radius: 50%;
+}
+.league-class-name-input {
+  flex: 1 1 110px;
+  min-width: 90px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.league-class-name-input:hover {
+  border-color: var(--border);
+}
+.league-class-name-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  background: rgba(0, 0, 0, 0.2);
+}
+.league-class-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.league-class-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* アイコンボタン */
+.league-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.league-icon-btn:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+.league-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.league-icon-danger:hover:not(:disabled) {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+.league-icon-active {
+  background: var(--amber-glow);
+  border-color: rgba(230, 168, 23, 0.5);
+  color: var(--amber-light);
+}
+.league-add-class-btn {
+  font-size: 13px;
+}
+
+/* 選手割当リスト */
+.league-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.league-member-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-member-absent {
+  opacity: 0.55;
+}
+.league-member-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.league-member-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.league-member-class-select {
+  margin-left: auto;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.league-member-class-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+/* サブナビ */
+.league-subnav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.league-subnav-btn {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 4px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.league-subnav-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--amber);
+}
+.league-subnav-btn.active {
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-color: rgba(230, 168, 23, 0.5);
+}
+
+/* 階級見出し */
+.league-class-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--amber-light);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.league-class-progress {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+/* 星取り表（ラウンドロビン表） */
+.league-cross-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 8px;
+}
+.league-cross-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.league-cross-table th,
+.league-cross-table td {
+  border: 1px solid var(--border);
+  text-align: center;
+}
+/* 左上の角 */
+.lx-corner {
+  background: var(--bg-card);
+  min-width: 92px;
+}
+/* 列ヘッダー（番号） */
+.lx-colhead {
+  width: 36px;
+  height: 30px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+}
+/* 行ヘッダー（番号＋名前） */
+.lx-rowhead {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.lx-rownum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-radius: 50%;
+}
+/* 結果セル */
+.lx-cell {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.lx-cell:hover { background: var(--amber-glow); }
+.lx-empty   { color: var(--text-muted); }
+.lx-win     { color: var(--amber-light); font-weight: 700; background: rgba(230,168,23,0.08); }
+.lx-loss    { color: #e0917f; }
+.lx-draw    { color: var(--text-secondary); }
+/* 対角（自分自身） */
+.lx-diag {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255,255,255,0.03),
+    rgba(255,255,255,0.03) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+/* 集計列 */
+.lx-sum {
+  width: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+}
+.lx-sum-w { color: var(--amber-light); font-weight: 700; }
+.lx-sum-l { color: #e0917f; }
+.lx-sum-d { color: var(--text-secondary); }
+.league-cross-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+/* 行末の休場ボタン列 */
+.lx-op {
+  width: 34px;
+  background: var(--bg-card);
+  border: none !important;
+}
+.lx-op-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.lx-op-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+
+/* 参加者管理（休場/復帰・新規参入） */
+.league-participant-mgmt {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.league-pm-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.league-pm-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  width: 64px;
+}
+.league-pm-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.league-pm-none {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.league-pm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 3px 4px 3px 10px;
+}
+.league-pm-chip button {
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--accent-green, #4ce7a0);
+  background: transparent;
+  border: 1px solid rgba(76, 231, 160, 0.4);
+  border-radius: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.league-pm-chip button:hover {
+  background: rgba(76, 231, 160, 0.12);
+}
+.league-pm-select {
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.league-pm-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+
+/* 順位表 */
+.league-standings-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.league-standings-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+.league-standings-table td {
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 8px 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.league-standings-table .ls-pos {
+  font-weight: 700;
+  color: var(--amber-light);
+  width: 36px;
+}
+.league-standings-table .ls-name {
+  text-align: left;
+}
+.league-standings-table .ls-pts {
+  font-weight: 700;
+  color: var(--amber-light);
+}
+
+/* 昇降級セクション */
+.league-boundary {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-boundary-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.league-boundary-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.league-boundary-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.league-swap-input {
+  width: 52px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: center;
+  color: var(--amber-light);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.league-swap-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+.league-boundary-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.lb-demote  { color: #e0917f; }
+.lb-promote { color: var(--accent-green, #4ce7a0); }
+.league-finalize-btn {
+  margin-top: 6px;
+  width: 100%;
+}
