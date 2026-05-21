@@ -379,9 +379,8 @@ const League = {
         const done = matches.filter(m => m.result).length;
         inner = `
           <p class="league-class-progress">${done} / ${matches.length} 局 完了</p>
-          <div class="league-match-list">
-            ${matches.map((m, i) => this._renderMatchRow(cls.id, m, i, pmap)).join('')}
-          </div>`;
+          ${this._renderCrossTable(league, term, cls, pmap)}
+          <p class="league-cross-hint">セルをタップで結果を入力（空欄→○→△→●→空欄）。</p>`;
       }
       html += `
         <div class="card">
@@ -393,33 +392,108 @@ const League = {
     return html;
   },
 
-  /** 対局1行 */
-  _renderMatchRow(classId, m, idx, pmap) {
-    const p1 = pmap[m.p1Id];
-    const p2 = pmap[m.p2Id];
-    const n1 = p1 ? this._esc(p1.name) : '(不明)';
-    const n2 = p2 ? this._esc(p2.name) : '(不明)';
-    const r = m.result;
+  /**
+   * 階級内の星取り表（ラウンドロビン表）を描画。
+   * 行＝各選手、列＝対戦相手。セル(行i,列j)は選手iの選手jに対する結果。
+   * 右端に 勝/敗/分 の集計列を付ける。
+   */
+  _renderCrossTable(league, term, cls, pmap) {
+    const ids = this._activeMemberIds(league, cls.id);
+    const matches = term.matches[cls.id] || [];
+
+    // 2選手間の対局を引く
+    const matchOf = (a, b) => matches.find(m =>
+      (m.p1Id === a && m.p2Id === b) || (m.p1Id === b && m.p2Id === a));
+
+    // 行選手から見たセル結果: 'win'|'loss'|'draw'|null
+    const cellOf = (rowId, colId) => {
+      const m = matchOf(rowId, colId);
+      if (!m || !m.result) return { m, res: null };
+      if (m.result === 'draw') return { m, res: 'draw' };
+      const winnerId = m.result === 'p1' ? m.p1Id : m.p2Id;
+      return { m, res: winnerId === rowId ? 'win' : 'loss' };
+    };
+
+    const SYM = { win: '○', loss: '●', draw: '△' };
+
+    // ヘッダー（列番号）
+    let head = '<th class="lx-corner"></th>';
+    ids.forEach((_, j) => { head += `<th class="lx-colhead">${j + 1}</th>`; });
+    head += '<th class="lx-sum">勝</th><th class="lx-sum">敗</th><th class="lx-sum">分</th>';
+
+    // 各行
+    let body = '';
+    ids.forEach((rowId, i) => {
+      const p = pmap[rowId];
+      const rowName = p ? this._esc(p.name) : '(不明)';
+      let w = 0, l = 0, d = 0;
+      let cells = '';
+      ids.forEach((colId, j) => {
+        if (i === j) {
+          cells += '<td class="lx-diag"></td>';
+          return;
+        }
+        const { m, res } = cellOf(rowId, colId);
+        if (res === 'win') w++;
+        else if (res === 'loss') l++;
+        else if (res === 'draw') d++;
+        const cls2 = res ? `lx-${res}` : 'lx-empty';
+        cells += `<td class="lx-cell ${cls2}"
+          onclick="League.cycleCell('${cls.id}','${m.id}','${rowId}')">${res ? SYM[res] : ''}</td>`;
+      });
+      body += `
+        <tr>
+          <th class="lx-rowhead"><span class="lx-rownum">${i + 1}</span>${rowName}</th>
+          ${cells}
+          <td class="lx-sum lx-sum-w">${w}</td>
+          <td class="lx-sum lx-sum-l">${l}</td>
+          <td class="lx-sum lx-sum-d">${d}</td>
+        </tr>`;
+    });
+
     return `
-      <div class="league-match-row ${r ? 'done' : ''}">
-        <span class="league-match-no">${idx + 1}</span>
-        <span class="league-match-player ${r === 'p1' ? 'winner' : r === 'p2' ? 'loser' : ''}">${n1}</span>
-        <div class="league-match-btns">
-          <button class="league-res-btn ${r === 'p1' ? 'active' : ''}"
-                  title="${n1} の勝ち"
-                  onclick="League.setMatchResult('${classId}','${m.id}','p1')">○</button>
-          <button class="league-res-btn draw ${r === 'draw' ? 'active' : ''}"
-                  title="引き分け"
-                  onclick="League.setMatchResult('${classId}','${m.id}','draw')">△</button>
-          <button class="league-res-btn ${r === 'p2' ? 'active' : ''}"
-                  title="${n2} の勝ち"
-                  onclick="League.setMatchResult('${classId}','${m.id}','p2')">○</button>
-          ${r ? `<button class="league-res-btn reset"
-                  title="リセット"
-                  onclick="League.setMatchResult('${classId}','${m.id}',null)">✕</button>` : ''}
-        </div>
-        <span class="league-match-player ${r === 'p2' ? 'winner' : r === 'p1' ? 'loser' : ''}">${n2}</span>
+      <div class="league-cross-wrap">
+        <table class="league-cross-table">
+          <thead><tr>${head}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
       </div>`;
+  },
+
+  /**
+   * 星取り表のセルをタップして結果を循環させる。
+   * 行選手視点で 空欄→勝→分→負→空欄。
+   */
+  cycleCell(classId, matchId, rowId) {
+    const league = AppStorage.getLeague();
+    const term = this._getCurrentTerm(league);
+    const m = (term.matches[classId] || []).find(mm => mm.id === matchId);
+    if (!m) return;
+
+    // 現在の行選手視点の状態
+    let cur;
+    if (!m.result) cur = null;
+    else if (m.result === 'draw') cur = 'draw';
+    else {
+      const winnerId = m.result === 'p1' ? m.p1Id : m.p2Id;
+      cur = winnerId === rowId ? 'win' : 'loss';
+    }
+    const order = [null, 'win', 'draw', 'loss'];
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+
+    let res;
+    if (next === null) {
+      res = null;
+    } else if (next === 'draw') {
+      res = 'draw';
+    } else {
+      const rowIsP1 = m.p1Id === rowId;
+      const rowWins = next === 'win';
+      res = (rowWins === rowIsP1) ? 'p1' : 'p2';
+    }
+    m.result = res;
+    AppStorage.saveLeague(league);
+    this.render();
   },
 
   /** 総当たり表を生成 */

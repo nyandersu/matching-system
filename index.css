@@ -2494,90 +2494,99 @@ body::before {
   margin-bottom: 10px;
 }
 
-/* 対局リスト */
-.league-match-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* 星取り表（ラウンドロビン表） */
+.league-cross-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 8px;
 }
-.league-match-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.02);
+.league-cross-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.league-cross-table th,
+.league-cross-table td {
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-.league-match-row.done {
-  border-color: rgba(76, 231, 160, 0.15);
-}
-.league-match-no {
-  flex-shrink: 0;
-  width: 20px;
-  font-size: 11px;
-  color: var(--text-muted);
   text-align: center;
 }
-.league-match-player {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 左上の角 */
+.lx-corner {
+  background: var(--bg-card);
+  min-width: 92px;
 }
-.league-match-player:first-of-type { text-align: right; }
-.league-match-player.winner {
-  color: var(--amber-light);
-  font-weight: 700;
-}
-.league-match-player.loser {
-  opacity: 0.5;
-}
-.league-match-btns {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.league-res-btn {
-  width: 30px;
+/* 列ヘッダー（番号） */
+.lx-colhead {
+  width: 36px;
   height: 30px;
-  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+}
+/* 行ヘッダー（番号＋名前） */
+.lx-rowhead {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+.lx-rownum {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  font-family: inherit;
-  color: var(--text-secondary);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-radius: 50%;
+}
+/* 結果セル */
+.lx-cell {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
   cursor: pointer;
   transition: var(--transition-fast);
 }
-.league-res-btn:hover {
-  border-color: var(--amber);
-  color: var(--amber-light);
+.lx-cell:hover { background: var(--amber-glow); }
+.lx-empty   { color: var(--text-muted); }
+.lx-win     { color: var(--amber-light); font-weight: 700; background: rgba(230,168,23,0.08); }
+.lx-loss    { color: #e0917f; }
+.lx-draw    { color: var(--text-secondary); }
+/* 対角（自分自身） */
+.lx-diag {
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(255,255,255,0.03),
+    rgba(255,255,255,0.03) 4px,
+    transparent 4px,
+    transparent 8px
+  );
 }
-.league-res-btn.active {
-  background: var(--amber-glow);
-  border-color: rgba(230, 168, 23, 0.6);
-  color: var(--amber-light);
-  font-weight: 700;
+/* 集計列 */
+.lx-sum {
+  width: 30px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-card);
 }
-.league-res-btn.draw.active {
-  background: rgba(155, 151, 176, 0.18);
-  border-color: rgba(155, 151, 176, 0.5);
-  color: var(--text-primary);
-}
-.league-res-btn.reset {
+.lx-sum-w { color: var(--amber-light); font-weight: 700; }
+.lx-sum-l { color: #e0917f; }
+.lx-sum-d { color: var(--text-secondary); }
+.league-cross-hint {
   font-size: 11px;
   color: var(--text-muted);
-}
-.league-res-btn.reset:hover {
-  border-color: #c0392b;
-  color: #e74c3c;
+  margin-top: 2px;
 }
 
 /* 順位表 */
