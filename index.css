@@ -2250,3 +2250,202 @@ body::before {
 
 /* hidden utility */
 .hidden { display: none !important; }
+
+/* ============================================
+   リーグ戦モード
+   ============================================ */
+
+/* 未開始時の案内 */
+.league-intro {
+  text-align: center;
+  padding: 48px 24px;
+}
+.league-intro .empty-icon {
+  font-size: 56px;
+  margin-bottom: 12px;
+}
+.league-intro-title {
+  font-size: 22px;
+  color: var(--amber-light);
+  margin-bottom: 12px;
+}
+.league-intro-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  margin-bottom: 24px;
+}
+
+/* ヘッダー */
+.league-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.league-term-badge {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border: 1px solid rgba(230, 168, 23, 0.4);
+  border-radius: 20px;
+  padding: 6px 18px;
+}
+
+/* セクション補足文 */
+.league-section-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+.league-empty-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 16px 4px;
+  text-align: center;
+}
+
+/* 階級リスト */
+.league-class-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.league-class-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-class-order {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-radius: 50%;
+}
+.league-class-name-input {
+  flex: 1 1 110px;
+  min-width: 90px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+.league-class-name-input:hover {
+  border-color: var(--border);
+}
+.league-class-name-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  background: rgba(0, 0, 0, 0.2);
+}
+.league-class-count {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.league-class-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* アイコンボタン */
+.league-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.league-icon-btn:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+.league-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.league-icon-danger:hover:not(:disabled) {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+.league-icon-active {
+  background: var(--amber-glow);
+  border-color: rgba(230, 168, 23, 0.5);
+  color: var(--amber-light);
+}
+.league-add-class-btn {
+  font-size: 13px;
+}
+
+/* 選手割当リスト */
+.league-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.league-member-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-member-absent {
+  opacity: 0.55;
+}
+.league-member-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.league-member-meta {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.league-member-class-select {
+  margin-left: auto;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+.league-member-class-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}

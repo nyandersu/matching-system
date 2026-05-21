@@ -181,6 +181,10 @@
       <span class="tab-icon">🏆</span>
       <span class="tab-text">成績表</span>
     </button>
+    <button class="tab-btn" data-tab="league" role="tab" id="tab-btn-league">
+      <span class="tab-icon">🏛</span>
+      <span class="tab-text">リーグ戦</span>
+    </button>
   </nav>
 
   <!-- ======================== -->
@@ -361,6 +365,13 @@
       <div id="standings-container"></div>
     </div>
   </div>
+
+  <!-- ======================== -->
+  <!-- Tab: リーグ戦             -->
+  <!-- ======================== -->
+  <div class="tab-panel" id="tab-league" role="tabpanel">
+    <div id="league-content"></div>
+  </div>
 </div>
 
 <!-- パスワード変更 -->
@@ -426,6 +437,7 @@
 <script src="js/storage.js"></script>
 <script src="js/matching.js"></script>
 <script src="js/pdf.js"></script>
+<script src="js/league.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/app.js"></script>
 

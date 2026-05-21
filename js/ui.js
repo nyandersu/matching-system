@@ -29,11 +29,15 @@ const UI = {
     // 部屋バッジを表示
     this._showRoomBadge();
 
+    // リーグ戦モードに応じてタブ表示を切り替え
+    this.applyLeagueMode();
+
     // 初回のローカル描画
     this.renderAll();
 
     // Supabaseからのリアルタイム同期が来た時のハンドラ
     AppStorage.initRealtime(() => {
+      this.applyLeagueMode();
       this.renderAll();
     });
 
@@ -249,6 +253,33 @@ const UI = {
     this.renderMatchingResult();
     this.renderRounds();
     this.renderStandings();
+    if (typeof League !== 'undefined') League.render();
+  },
+
+  /**
+   * リーグ戦モードに応じてタブの表示を切り替える。
+   * - league.enabled=true  : マッチング/結果入力/成績表 を隠し、リーグ戦タブを表示
+   * - league.enabled=false : リーグ戦タブを隠し、通常タブを表示
+   * 選手管理タブは両モード共通で常に表示。
+   */
+  applyLeagueMode() {
+    const enabled = !!(AppStorage.getLeague() || {}).enabled;
+    const tournamentTabs = ['matching', 'results', 'standings'];
+    tournamentTabs.forEach(t => {
+      const btn = document.getElementById(`tab-btn-${t}`);
+      if (btn) btn.classList.toggle('hidden', enabled);
+    });
+    const leagueBtn = document.getElementById('tab-btn-league');
+    if (leagueBtn) leagueBtn.classList.toggle('hidden', !enabled);
+
+    // 現在表示中のタブが隠された場合は安全なタブへ退避
+    const activePanel = document.querySelector('.tab-panel.active');
+    const activeId = activePanel ? activePanel.id.replace('tab-', '') : 'players';
+    if (enabled && tournamentTabs.includes(activeId)) {
+      this.showTab('league');
+    } else if (!enabled && activeId === 'league') {
+      this.showTab('players');
+    }
   },
 
   // ============================================
@@ -277,6 +308,7 @@ const UI = {
     // タブ切り替え時にデータ更新
     if (tabId === 'results') this.renderRounds();
     if (tabId === 'standings') this.renderStandings();
+    if (tabId === 'league' && typeof League !== 'undefined') League.render();
   },
 
   // ============================================
