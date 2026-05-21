@@ -1682,6 +1682,14 @@ body::before {
 
 .room-history-item {
   display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* 入室ボタン（コード＋矢印） */
+.room-history-enter {
+  flex: 1;
+  display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
@@ -1693,11 +1701,29 @@ body::before {
   font-family: inherit;
   color: var(--text-primary);
 }
-
-.room-history-item:hover {
+.room-history-enter:hover {
   border-color: var(--amber);
   background: var(--amber-glow);
   color: var(--amber-light);
+}
+
+/* 削除ボタン */
+.room-history-delete {
+  flex-shrink: 0;
+  width: 40px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.room-history-delete:hover {
+  border-color: #c0392b;
+  color: #e74c3c;
+  background: rgba(192, 57, 43, 0.1);
 }
 
 .room-history-code {

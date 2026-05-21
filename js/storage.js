@@ -253,6 +253,31 @@ const AppStorage = {
     localStorage.setItem(this._getRoomHistoryKey(), JSON.stringify(history.slice(0, 5)));
   },
 
+  /**
+   * 部屋を完全に削除する。
+   * - 最近使った部屋リストから除外
+   * - ローカルストレージのデータを削除
+   * - Supabase の players / rounds / leagues も削除
+   */
+  deleteRoom(roomId) {
+    const rid = (roomId || '').toUpperCase().trim();
+    if (!rid) return;
+
+    // 最近使った部屋リストから除外
+    const history = this.getRoomHistory().filter(r => r !== rid);
+    localStorage.setItem(this._getRoomHistoryKey(), JSON.stringify(history));
+
+    // ローカルデータ削除
+    localStorage.removeItem(`shogi_${rid}`);
+
+    // Supabase 上のデータ削除
+    if (supabaseClient) {
+      supabaseClient.from('players').delete().eq('room_id', rid).then().catch(console.warn);
+      supabaseClient.from('rounds').delete().eq('room_id', rid).then().catch(console.warn);
+      supabaseClient.from('leagues').delete().eq('room_id', rid).then().catch(console.warn);
+    }
+  },
+
   // ============================================
   // リアルタイム同期
   // ============================================
