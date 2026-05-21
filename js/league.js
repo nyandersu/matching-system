@@ -166,7 +166,7 @@ const League = {
     return `
       <div class="card">
         <h2 class="card-title"><span class="icon">🏅</span> 階級</h2>
-        <p class="league-section-note">上にあるほど上位の階級です（▲▼で並び替え）。</p>
+        <p class="league-section-note">階級名はタップで編集できます。上にあるほど上位の階級です（▲▼で並び替え）。</p>
         <div class="league-class-list">${rows}</div>
         <button class="btn btn-secondary league-add-class-btn" onclick="League.addClass()">
           ＋ 階級を追加
