@@ -2449,3 +2449,166 @@ body::before {
   outline: none;
   border-color: var(--border-focus);
 }
+
+/* サブナビ */
+.league-subnav {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.league-subnav-btn {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 8px 4px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.league-subnav-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--amber);
+}
+.league-subnav-btn.active {
+  color: var(--amber-light);
+  background: var(--amber-glow);
+  border-color: rgba(230, 168, 23, 0.5);
+}
+
+/* 階級見出し */
+.league-class-heading {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--amber-light);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.league-class-progress {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+/* 対局リスト */
+.league-match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.league-match-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-match-row.done {
+  border-color: rgba(76, 231, 160, 0.15);
+}
+.league-match-no {
+  flex-shrink: 0;
+  width: 20px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.league-match-player {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.league-match-player:first-of-type { text-align: right; }
+.league-match-player.winner {
+  color: var(--amber-light);
+  font-weight: 700;
+}
+.league-match-player.loser {
+  opacity: 0.5;
+}
+.league-match-btns {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.league-res-btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.league-res-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+.league-res-btn.active {
+  background: var(--amber-glow);
+  border-color: rgba(230, 168, 23, 0.6);
+  color: var(--amber-light);
+  font-weight: 700;
+}
+.league-res-btn.draw.active {
+  background: rgba(155, 151, 176, 0.18);
+  border-color: rgba(155, 151, 176, 0.5);
+  color: var(--text-primary);
+}
+.league-res-btn.reset {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.league-res-btn.reset:hover {
+  border-color: #c0392b;
+  color: #e74c3c;
+}
+
+/* 順位表 */
+.league-standings-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.league-standings-table th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+}
+.league-standings-table td {
+  font-size: 13px;
+  color: var(--text-primary);
+  padding: 8px 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.league-standings-table .ls-pos {
+  font-weight: 700;
+  color: var(--amber-light);
+  width: 36px;
+}
+.league-standings-table .ls-name {
+  text-align: left;
+}
+.league-standings-table .ls-pts {
+  font-weight: 700;
+  color: var(--amber-light);
+}

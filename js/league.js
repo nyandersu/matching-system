@@ -14,9 +14,37 @@
  */
 
 const League = {
+  /** 現在のサブビュー: 'manage' | 'matches' | 'standings' */
+  subView: 'manage',
+
   /** 階級IDを生成 */
   _genClassId() {
     return 'cls_' + Math.random().toString(36).slice(2, 9);
+  },
+
+  /** 汎用IDを生成（対局など） */
+  _genId() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return 'id_' + Math.random().toString(36).slice(2, 11);
+  },
+
+  /** 現在の期オブジェクトを取得（無ければ作成） */
+  _getCurrentTerm(league) {
+    if (!league.terms) league.terms = [];
+    let t = league.terms.find(tt => tt.term === league.currentTerm);
+    if (!t) {
+      t = { term: league.currentTerm, matches: {}, finalized: false, changes: [] };
+      league.terms.push(t);
+    }
+    if (!t.matches) t.matches = {};
+    return t;
+  },
+
+  /** 選手ID→選手オブジェクトのマップ */
+  _playerMap() {
+    const map = {};
+    AppStorage.getPlayers().forEach(p => { map[p.id] = p; });
+    return map;
   },
 
   /** HTMLエスケープ */
@@ -41,10 +69,40 @@ const League = {
       return;
     }
 
+    let body;
+    if (this.subView === 'matches') {
+      body = this._renderMatchesView(league);
+    } else if (this.subView === 'standings') {
+      body = this._renderStandingsView(league);
+    } else {
+      body = this._renderClassSection(league) + this._renderMemberSection(league);
+    }
+
     container.innerHTML =
       this._renderHeader(league) +
-      this._renderClassSection(league) +
-      this._renderMemberSection(league);
+      this._renderSubNav() +
+      body;
+  },
+
+  /** サブビュー切り替えナビ */
+  _renderSubNav() {
+    const tabs = [
+      { id: 'manage',    label: '階級・選手' },
+      { id: 'matches',   label: '対局・結果' },
+      { id: 'standings', label: '順位表' },
+    ];
+    return `
+      <div class="league-subnav">
+        ${tabs.map(t => `
+          <button class="league-subnav-btn ${this.subView === t.id ? 'active' : ''}"
+                  onclick="League.switchView('${t.id}')">${t.label}</button>
+        `).join('')}
+      </div>`;
+  },
+
+  switchView(view) {
+    this.subView = view;
+    this.render();
   },
 
   /** 未開始時の案内 */
@@ -269,5 +327,219 @@ const League = {
     m.status = m.status === 'absent' ? 'active' : 'absent';
     AppStorage.saveLeague(league);
     this.render();
+  },
+
+  // ============================================
+  // 対局・結果（Phase3）
+  // ============================================
+
+  /** 階級の出場メンバー（休場を除く active のみ）の選手ID配列 */
+  _activeMemberIds(league, classId) {
+    return (league.members || [])
+      .filter(m => m.classId === classId && m.status === 'active')
+      .map(m => m.playerId);
+  },
+
+  /** 対局・結果ビュー */
+  _renderMatchesView(league) {
+    const term = this._getCurrentTerm(league);
+    const classes = league.classes || [];
+    const pmap = this._playerMap();
+
+    if (classes.length === 0) {
+      return `<div class="card"><p class="league-empty-hint">先に「階級・選手」タブで階級を作成してください。</p></div>`;
+    }
+
+    // 総当たり対局が1つでも存在するか
+    const hasAnyMatches = classes.some(c => (term.matches[c.id] || []).length > 0);
+
+    let html = `
+      <div class="card">
+        <h2 class="card-title"><span class="icon">⚔</span> 第${league.currentTerm}期 対局</h2>
+        <p class="league-section-note">各階級内で総当たり（全員と1局ずつ）を行います。休場者は除外されます。</p>
+        <button class="btn btn-primary" onclick="League.generateRoundRobin()">
+          ${hasAnyMatches ? '総当たり表を再生成' : '総当たり表を生成'}
+        </button>
+      </div>`;
+
+    classes.forEach(cls => {
+      const matches = term.matches[cls.id] || [];
+      const activeCount = this._activeMemberIds(league, cls.id).length;
+      let inner;
+      if (matches.length === 0) {
+        inner = `<p class="league-empty-hint">${
+          activeCount < 2
+            ? '出場選手が2名未満のため対局はありません。'
+            : '「総当たり表を生成」を押すと対局が作成されます。'
+        }</p>`;
+      } else {
+        const done = matches.filter(m => m.result).length;
+        inner = `
+          <p class="league-class-progress">${done} / ${matches.length} 局 完了</p>
+          <div class="league-match-list">
+            ${matches.map((m, i) => this._renderMatchRow(cls.id, m, i, pmap)).join('')}
+          </div>`;
+      }
+      html += `
+        <div class="card">
+          <h3 class="league-class-heading">${this._esc(cls.name)}</h3>
+          ${inner}
+        </div>`;
+    });
+
+    return html;
+  },
+
+  /** 対局1行 */
+  _renderMatchRow(classId, m, idx, pmap) {
+    const p1 = pmap[m.p1Id];
+    const p2 = pmap[m.p2Id];
+    const n1 = p1 ? this._esc(p1.name) : '(不明)';
+    const n2 = p2 ? this._esc(p2.name) : '(不明)';
+    const r = m.result;
+    return `
+      <div class="league-match-row ${r ? 'done' : ''}">
+        <span class="league-match-no">${idx + 1}</span>
+        <span class="league-match-player ${r === 'p1' ? 'winner' : r === 'p2' ? 'loser' : ''}">${n1}</span>
+        <div class="league-match-btns">
+          <button class="league-res-btn ${r === 'p1' ? 'active' : ''}"
+                  title="${n1} の勝ち"
+                  onclick="League.setMatchResult('${classId}','${m.id}','p1')">○</button>
+          <button class="league-res-btn draw ${r === 'draw' ? 'active' : ''}"
+                  title="引き分け"
+                  onclick="League.setMatchResult('${classId}','${m.id}','draw')">△</button>
+          <button class="league-res-btn ${r === 'p2' ? 'active' : ''}"
+                  title="${n2} の勝ち"
+                  onclick="League.setMatchResult('${classId}','${m.id}','p2')">○</button>
+          ${r ? `<button class="league-res-btn reset"
+                  title="リセット"
+                  onclick="League.setMatchResult('${classId}','${m.id}',null)">✕</button>` : ''}
+        </div>
+        <span class="league-match-player ${r === 'p2' ? 'winner' : r === 'p1' ? 'loser' : ''}">${n2}</span>
+      </div>`;
+  },
+
+  /** 総当たり表を生成 */
+  generateRoundRobin() {
+    const league = AppStorage.getLeague();
+    const term = this._getCurrentTerm(league);
+
+    // 既存の結果があれば警告
+    const hasResults = Object.values(term.matches || {})
+      .some(arr => (arr || []).some(m => m.result));
+    if (hasResults) {
+      if (!confirm('総当たり表を再生成しますか？\n入力済みの対局結果はすべて消去されます。')) return;
+    }
+
+    (league.classes || []).forEach(cls => {
+      const ids = this._activeMemberIds(league, cls.id);
+      const matches = [];
+      for (let i = 0; i < ids.length; i++) {
+        for (let j = i + 1; j < ids.length; j++) {
+          matches.push({ id: this._genId(), p1Id: ids[i], p2Id: ids[j], result: null });
+        }
+      }
+      term.matches[cls.id] = matches;
+    });
+
+    AppStorage.saveLeague(league);
+    this.render();
+    UI.showToast('総当たり表を生成しました', 'success');
+  },
+
+  /** 対局結果を設定 */
+  setMatchResult(classId, matchId, result) {
+    const league = AppStorage.getLeague();
+    const term = this._getCurrentTerm(league);
+    const m = (term.matches[classId] || []).find(mm => mm.id === matchId);
+    if (!m) return;
+    m.result = result;  // 'p1' | 'p2' | 'draw' | null
+    AppStorage.saveLeague(league);
+    this.render();
+  },
+
+  // ============================================
+  // 順位表（Phase3）
+  // ============================================
+
+  /** 階級内の成績を集計（勝2pt・分1pt） */
+  _classStandings(league, term, classId) {
+    const ids = this._activeMemberIds(league, classId);
+    const stats = {};
+    ids.forEach(id => { stats[id] = { id, w: 0, l: 0, d: 0, pts: 0, games: 0 }; });
+
+    (term.matches[classId] || []).forEach(m => {
+      if (!stats[m.p1Id] || !stats[m.p2Id]) return;
+      if (m.result === 'p1') {
+        stats[m.p1Id].w++; stats[m.p2Id].l++;
+      } else if (m.result === 'p2') {
+        stats[m.p2Id].w++; stats[m.p1Id].l++;
+      } else if (m.result === 'draw') {
+        stats[m.p1Id].d++; stats[m.p2Id].d++;
+      }
+    });
+
+    Object.values(stats).forEach(s => {
+      s.pts   = s.w * 2 + s.d;
+      s.games = s.w + s.l + s.d;
+    });
+
+    // Pt降順 → 勝数降順 → 敗数昇順
+    return Object.values(stats).sort((a, b) =>
+      b.pts - a.pts || b.w - a.w || a.l - b.l
+    );
+  },
+
+  /** 順位表ビュー */
+  _renderStandingsView(league) {
+    const term = this._getCurrentTerm(league);
+    const classes = league.classes || [];
+    const pmap = this._playerMap();
+
+    if (classes.length === 0) {
+      return `<div class="card"><p class="league-empty-hint">先に「階級・選手」タブで階級を作成してください。</p></div>`;
+    }
+
+    let html = `
+      <div class="card">
+        <h2 class="card-title"><span class="icon">🏆</span> 第${league.currentTerm}期 順位表</h2>
+        <p class="league-section-note">勝利2pt・引き分け1pt で集計。</p>
+      </div>`;
+
+    classes.forEach(cls => {
+      const standings = this._classStandings(league, term, cls.id);
+      let inner;
+      if (standings.length === 0) {
+        inner = `<p class="league-empty-hint">出場選手がいません。</p>`;
+      } else {
+        inner = `
+          <table class="league-standings-table">
+            <thead>
+              <tr><th>順位</th><th>選手</th><th>勝</th><th>敗</th><th>分</th><th>Pt</th></tr>
+            </thead>
+            <tbody>
+              ${standings.map((s, i) => {
+                const p = pmap[s.id];
+                return `
+                  <tr>
+                    <td class="ls-pos">${i + 1}</td>
+                    <td class="ls-name">${p ? this._esc(p.name) : '(不明)'}</td>
+                    <td>${s.w}</td>
+                    <td>${s.l}</td>
+                    <td>${s.d}</td>
+                    <td class="ls-pts">${s.pts}</td>
+                  </tr>`;
+              }).join('')}
+            </tbody>
+          </table>`;
+      }
+      html += `
+        <div class="card">
+          <h3 class="league-class-heading">${this._esc(cls.name)}</h3>
+          ${inner}
+        </div>`;
+    });
+
+    return html;
   },
 };
