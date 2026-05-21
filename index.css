@@ -2612,3 +2612,60 @@ body::before {
   font-weight: 700;
   color: var(--amber-light);
 }
+
+/* 昇降級セクション */
+.league-boundary {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.league-boundary-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.league-boundary-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.league-boundary-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.league-swap-input {
+  width: 52px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: center;
+  color: var(--amber-light);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.league-swap-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+.league-boundary-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.lb-demote  { color: #e0917f; }
+.lb-promote { color: var(--accent-green, #4ce7a0); }
+.league-finalize-btn {
+  margin-top: 6px;
+  width: 100%;
+}

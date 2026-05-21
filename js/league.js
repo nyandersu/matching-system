@@ -17,6 +17,9 @@ const League = {
   /** 現在のサブビュー: 'manage' | 'matches' | 'standings' */
   subView: 'manage',
 
+  /** 昇降級の入替人数ドラフト（境界index → 人数）。提案値からの編集を保持 */
+  _swapCounts: {},
+
   /** 階級IDを生成 */
   _genClassId() {
     return 'cls_' + Math.random().toString(36).slice(2, 9);
@@ -540,6 +543,158 @@ const League = {
         </div>`;
     });
 
+    // 昇降級・期の移行
+    html += this._renderPromotionSection(league, term);
+
     return html;
+  },
+
+  // ============================================
+  // 昇降級・期の移行（Phase4）
+  // ============================================
+
+  /**
+   * 各境界の推奨入替人数。
+   * リーグの秩序維持の目安として「隣接2階級の少ない方の約1/3」を提案。
+   * （上限は半数。中間階級は上下境界で最大 2×round(N/3) ≤ N となり破綻しない）
+   */
+  _suggestSwap(upperN, lowerN) {
+    const smaller = Math.min(upperN, lowerN);
+    if (smaller < 2) return 0;
+    const byThird = Math.round(smaller / 3);
+    return Math.max(1, Math.min(byThird, Math.floor(smaller / 2)));
+  },
+
+  setSwapCount(boundaryIndex, value) {
+    this._swapCounts[boundaryIndex] = Math.max(0, parseInt(value) || 0);
+    this.render();
+  },
+
+  /** 昇降級セクション（順位表ビュー末尾に表示） */
+  _renderPromotionSection(league, term) {
+    const classes = league.classes || [];
+    if (classes.length < 2) {
+      return `<div class="card"><p class="league-empty-hint">階級が2つ以上あると昇降級・期の移行を行えます。</p></div>`;
+    }
+    const pmap = this._playerMap();
+    const nameList = (arr) =>
+      arr.map(s => this._esc(pmap[s.id] ? pmap[s.id].name : '?')).join('、') || '—';
+
+    let rows = '';
+    for (let i = 0; i < classes.length - 1; i++) {
+      const upper = classes[i], lower = classes[i + 1];
+      const upperStand = this._classStandings(league, term, upper.id);
+      const lowerStand = this._classStandings(league, term, lower.id);
+      const maxSwap = Math.min(upperStand.length, lowerStand.length);
+      const suggested = this._suggestSwap(upperStand.length, lowerStand.length);
+      const swap = Math.min(this._swapCounts[i] != null ? this._swapCounts[i] : suggested, maxSwap);
+      const demoted  = swap > 0 ? upperStand.slice(-swap) : [];
+      const promoted = swap > 0 ? lowerStand.slice(0, swap) : [];
+
+      rows += `
+        <div class="league-boundary">
+          <div class="league-boundary-head">
+            <span class="league-boundary-title">${this._esc(upper.name)} ⇅ ${this._esc(lower.name)}</span>
+            <div class="league-boundary-ctrl">
+              <input type="number" class="league-swap-input" min="0" max="${maxSwap}"
+                     value="${swap}" onchange="League.setSwapCount(${i}, this.value)">
+              <span>名ずつ入替</span>
+            </div>
+          </div>
+          <div class="league-boundary-preview">
+            <span class="lb-demote">▼ ${this._esc(upper.name)} 降級: ${nameList(demoted)}</span>
+            <span class="lb-promote">▲ ${this._esc(lower.name)} 昇級: ${nameList(promoted)}</span>
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="card">
+        <h3 class="league-class-heading">昇降級・期の移行</h3>
+        <p class="league-section-note">
+          各階級の下位者が降級・下位階級の上位者が昇級します。入替人数は調整できます
+          （リーグの秩序を保つ目安として各階級の約1/3を提案）。
+          休場者は順位対象外・階級維持です。
+        </p>
+        ${rows}
+        <button class="btn btn-primary league-finalize-btn" onclick="League.finalizeTerm()">
+          第${league.currentTerm}期を確定して次の期へ
+        </button>
+      </div>`;
+  },
+
+  /** 現在の期を確定し、昇降級を適用して次の期へ進む */
+  finalizeTerm() {
+    const league = AppStorage.getLeague();
+    const term = this._getCurrentTerm(league);
+    const classes = league.classes || [];
+    if (classes.length < 2) return;
+
+    // 各境界の入替人数を確定
+    const swaps = [];
+    for (let i = 0; i < classes.length - 1; i++) {
+      const upperStand = this._classStandings(league, term, classes[i].id);
+      const lowerStand = this._classStandings(league, term, classes[i + 1].id);
+      const maxSwap = Math.min(upperStand.length, lowerStand.length);
+      const suggested = this._suggestSwap(upperStand.length, lowerStand.length);
+      const v = this._swapCounts[i] != null ? this._swapCounts[i] : suggested;
+      swaps.push(Math.max(0, Math.min(v, maxSwap)));
+    }
+
+    // 検証：各階級から出る合計（昇級out + 降級out）が出場者数を超えないか
+    for (let i = 0; i < classes.length; i++) {
+      const active = this._activeMemberIds(league, classes[i].id).length;
+      const down = i < classes.length - 1 ? swaps[i]     : 0;
+      const up   = i > 0                  ? swaps[i - 1] : 0;
+      if (down + up > active) {
+        alert(`「${classes[i].name}」は出場${active}名に対し昇降級の合計が${down + up}名で多すぎます。\n入替人数を減らしてください。`);
+        return;
+      }
+    }
+
+    // 未入力対局があれば警告
+    let pending = 0, total = 0;
+    classes.forEach(c => {
+      (term.matches[c.id] || []).forEach(m => { total++; if (!m.result) pending++; });
+    });
+    let confirmMsg = `第${league.currentTerm}期を確定し、昇降級を適用して第${league.currentTerm + 1}期に進みますか？`;
+    if (pending > 0) confirmMsg = `未入力の対局が${pending}局あります。\n` + confirmMsg;
+    if (!confirm(confirmMsg)) return;
+
+    // 昇降級を計算
+    const changes = [];
+    const newClassOf = {};
+    for (let i = 0; i < classes.length - 1; i++) {
+      const swap = swaps[i];
+      if (swap <= 0) continue;
+      const upper = classes[i], lower = classes[i + 1];
+      const upperStand = this._classStandings(league, term, upper.id);
+      const lowerStand = this._classStandings(league, term, lower.id);
+      upperStand.slice(-swap).forEach(s => {
+        newClassOf[s.id] = lower.id;
+        changes.push({ playerId: s.id, fromClassId: upper.id, toClassId: lower.id, type: 'demote' });
+      });
+      lowerStand.slice(0, swap).forEach(s => {
+        newClassOf[s.id] = upper.id;
+        changes.push({ playerId: s.id, fromClassId: lower.id, toClassId: upper.id, type: 'promote' });
+      });
+    }
+
+    // 適用
+    term.finalized = true;
+    term.changes = changes;
+    (league.members || []).forEach(m => {
+      if (newClassOf[m.playerId]) m.classId = newClassOf[m.playerId];
+    });
+    league.currentTerm = (league.currentTerm || 1) + 1;
+
+    AppStorage.saveLeague(league);
+    this._swapCounts = {};
+    this.subView = 'manage';
+    this.render();
+    UI.showToast(
+      `第${term.term}期を確定しました（昇降級${changes.length}件）。第${league.currentTerm}期を開始します。`,
+      'success'
+    );
   },
 };
