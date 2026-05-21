@@ -2588,6 +2588,100 @@ body::before {
   color: var(--text-muted);
   margin-top: 2px;
 }
+/* 行末の休場ボタン列 */
+.lx-op {
+  width: 34px;
+  background: var(--bg-card);
+  border: none !important;
+}
+.lx-op-btn {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+.lx-op-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber-light);
+}
+
+/* 参加者管理（休場/復帰・新規参入） */
+.league-participant-mgmt {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.league-pm-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.league-pm-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  width: 64px;
+}
+.league-pm-items {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.league-pm-none {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.league-pm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 3px 4px 3px 10px;
+}
+.league-pm-chip button {
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--accent-green, #4ce7a0);
+  background: transparent;
+  border: 1px solid rgba(76, 231, 160, 0.4);
+  border-radius: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.league-pm-chip button:hover {
+  background: rgba(76, 231, 160, 0.12);
+}
+.league-pm-select {
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  max-width: 100%;
+}
+.league-pm-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
 
 /* 順位表 */
 .league-standings-table {

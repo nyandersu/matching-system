@@ -380,12 +380,13 @@ const League = {
         inner = `
           <p class="league-class-progress">${done} / ${matches.length} 局 完了</p>
           ${this._renderCrossTable(league, term, cls, pmap)}
-          <p class="league-cross-hint">セルをタップで結果を入力（空欄→○→△→●→空欄）。</p>`;
+          <p class="league-cross-hint">セルをタップで結果を入力（空欄→○→△→●→空欄）。右端の「休」で休場。</p>`;
       }
       html += `
         <div class="card">
           <h3 class="league-class-heading">${this._esc(cls.name)}</h3>
           ${inner}
+          ${this._renderParticipantStrip(league, cls)}
         </div>`;
     });
 
@@ -420,6 +421,7 @@ const League = {
     let head = '<th class="lx-corner"></th>';
     ids.forEach((_, j) => { head += `<th class="lx-colhead">${j + 1}</th>`; });
     head += '<th class="lx-sum">勝</th><th class="lx-sum">敗</th><th class="lx-sum">分</th>';
+    head += '<th class="lx-op"></th>';
 
     // 各行
     let body = '';
@@ -448,6 +450,10 @@ const League = {
           <td class="lx-sum lx-sum-w">${w}</td>
           <td class="lx-sum lx-sum-l">${l}</td>
           <td class="lx-sum lx-sum-d">${d}</td>
+          <td class="lx-op">
+            <button class="lx-op-btn" title="${rowName} を休場にする"
+                    onclick="League.benchPlayer('${rowId}')">休</button>
+          </td>
         </tr>`;
     });
 
@@ -494,6 +500,141 @@ const League = {
     m.result = res;
     AppStorage.saveLeague(league);
     this.render();
+  },
+
+  // ============================================
+  // 参加者の管理（クロス表上で新規参入・休場・復帰）
+  // ============================================
+
+  /**
+   * 階級の対局を出場メンバーに合わせて差分同期する。
+   * - 両者が出場中のペアは既存対局（結果含む）を維持
+   * - 出場中でないメンバーが絡む対局は削除
+   * - 不足しているペアの対局を追加
+   * すでに対局表が生成済み（matches が非空）のときのみ機能する。
+   */
+  _syncClassMatches(league, classId) {
+    const term = this._getCurrentTerm(league);
+    const existing = term.matches[classId] || [];
+    if (existing.length === 0) return;  // 未生成なら何もしない
+
+    const activeIds  = this._activeMemberIds(league, classId);
+    const activeSet  = new Set(activeIds);
+    const pairKey    = (a, b) => [a, b].slice().sort().join('|');
+
+    // 両者出場中の対局のみ残す（結果保持）
+    const kept = existing.filter(m => activeSet.has(m.p1Id) && activeSet.has(m.p2Id));
+    const have = new Set(kept.map(m => pairKey(m.p1Id, m.p2Id)));
+
+    // 不足ペアを追加
+    for (let i = 0; i < activeIds.length; i++) {
+      for (let j = i + 1; j < activeIds.length; j++) {
+        const k = pairKey(activeIds[i], activeIds[j]);
+        if (!have.has(k)) {
+          kept.push({ id: this._genId(), p1Id: activeIds[i], p2Id: activeIds[j], result: null });
+        }
+      }
+    }
+    term.matches[classId] = kept;
+  },
+
+  /** 選手を休場にする（クロス表の行ボタンから） */
+  benchPlayer(playerId) {
+    const league = AppStorage.getLeague();
+    const m = (league.members || []).find(mm => mm.playerId === playerId);
+    if (!m) return;
+
+    const term = this._getCurrentTerm(league);
+    const pmap = this._playerMap();
+    const name = pmap[playerId] ? pmap[playerId].name : '';
+
+    // 結果入力済みの対局があるか
+    const theirMatches = (term.matches[m.classId] || [])
+      .filter(mm => mm.p1Id === playerId || mm.p2Id === playerId);
+    if (theirMatches.some(mm => mm.result)) {
+      if (!confirm(`${name} を休場にしますか？\nこの選手の対局結果は削除されます（復帰時に再作成されます）。`)) return;
+    }
+
+    m.status = 'absent';
+    this._syncClassMatches(league, m.classId);
+    AppStorage.saveLeague(league);
+    this.render();
+    UI.showToast(`${name} を休場にしました`, 'info');
+  },
+
+  /** 休場中の選手を復帰させる */
+  reinstatePlayer(playerId) {
+    const league = AppStorage.getLeague();
+    const m = (league.members || []).find(mm => mm.playerId === playerId);
+    if (!m) return;
+    m.status = 'active';
+    this._syncClassMatches(league, m.classId);
+    AppStorage.saveLeague(league);
+    this.render();
+    const pmap = this._playerMap();
+    UI.showToast(`${pmap[playerId] ? pmap[playerId].name : ''} が復帰しました`, 'success');
+  },
+
+  /** 新規参入：未所属の選手をこの階級に追加 */
+  addEntrant(classId, playerId) {
+    if (!playerId) return;
+    const league = AppStorage.getLeague();
+    if (!league.members) league.members = [];
+    if (league.members.find(m => m.playerId === playerId)) return;  // 既にどこかに所属
+
+    league.members.push({
+      playerId,
+      classId,
+      status: 'active',
+      joinedTerm: league.currentTerm || 1,
+    });
+    this._syncClassMatches(league, classId);
+    AppStorage.saveLeague(league);
+    this.render();
+    const pmap = this._playerMap();
+    UI.showToast(`${pmap[playerId] ? pmap[playerId].name : ''} が新規参入しました`, 'success');
+  },
+
+  /** 参加者管理ストリップ（休場中の復帰・新規参入） */
+  _renderParticipantStrip(league, cls) {
+    const pmap = this._playerMap();
+
+    // 休場中メンバー
+    const absent = (league.members || [])
+      .filter(m => m.classId === cls.id && m.status === 'absent');
+    // 新規参入候補：どの階級にも未所属の登録選手
+    const memberIds = new Set((league.members || []).map(m => m.playerId));
+    const candidates = AppStorage.getPlayers().filter(p => !memberIds.has(p.id));
+
+    const absentHtml = absent.length === 0
+      ? `<span class="league-pm-none">なし</span>`
+      : absent.map(m => {
+          const p = pmap[m.playerId];
+          return `<span class="league-pm-chip">
+            ${this._esc(p ? p.name : '?')}
+            <button onclick="League.reinstatePlayer('${m.playerId}')">復帰</button>
+          </span>`;
+        }).join('');
+
+    const entrantHtml = candidates.length === 0
+      ? `<span class="league-pm-none">参入可能な未所属選手なし</span>`
+      : `<select class="league-pm-select"
+                onchange="League.addEntrant('${cls.id}', this.value); this.value='';">
+          <option value="">＋ 新規参入する選手を選択</option>
+          ${candidates.map(p => `<option value="${p.id}">${this._esc(p.name)}</option>`).join('')}
+        </select>`;
+
+    return `
+      <div class="league-participant-mgmt">
+        <div class="league-pm-row">
+          <span class="league-pm-label">休場中</span>
+          <div class="league-pm-items">${absentHtml}</div>
+        </div>
+        <div class="league-pm-row">
+          <span class="league-pm-label">新規参入</span>
+          <div class="league-pm-items">${entrantHtml}</div>
+        </div>
+      </div>`;
   },
 
   /** 総当たり表を生成 */
