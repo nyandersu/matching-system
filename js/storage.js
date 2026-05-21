@@ -283,12 +283,14 @@ const AppStorage = {
     try {
       this._isSyncing = true;
 
-      const [sQuery, pQuery, rQuery] = await Promise.all([
+      const [sQuery, pQuery, rQuery, lQuery] = await Promise.all([
         supabaseClient.from('settings').select('*').eq('id', 'global').maybeSingle(),
         supabaseClient.from('players').select('*').eq('room_id', this.roomId),
-        supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number')
+        supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number'),
+        supabaseClient.from('leagues').select('data').eq('room_id', this.roomId).maybeSingle()
       ]);
 
+      // leagues テーブルのエラーは致命的としない（テーブル未作成の旧環境互換）
       if (sQuery.error || pQuery.error || rQuery.error) {
         throw new Error('Database fetch error');
       }
@@ -320,6 +322,14 @@ const AppStorage = {
             confirmed:    local?.confirmed || false,
           };
         });
+      }
+
+      // リーグデータ：Supabase に存在すればそれを採用
+      if (lQuery && !lQuery.error && lQuery.data && lQuery.data.data) {
+        const remoteLeague = lQuery.data.data;
+        if (remoteLeague && typeof remoteLeague === 'object') {
+          data.league = { ...this.getDefaultLeague(), ...remoteLeague };
+        }
       }
 
       localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
@@ -362,6 +372,15 @@ const AppStorage = {
           }))
         );
       }
+
+      // リーグデータの同期（部屋ごと1行の JSONB）
+      if (data.league) {
+        await supabaseClient.from('leagues').upsert({
+          room_id:    this.roomId,
+          data:       data.league,
+          updated_at: new Date().toISOString()
+        });
+      }
     } catch (err) {
       console.warn('Supabaseへの同期に失敗:(オフライン)', err);
     }
@@ -375,7 +394,10 @@ const AppStorage = {
     try {
       const raw = localStorage.getItem(this.getStorageKey());
       if (!raw) return this.getDefaultData();
-      return JSON.parse(raw);
+      const data = JSON.parse(raw);
+      // 旧データ互換：league キーが無ければ補完
+      if (!data.league) data.league = this.getDefaultLeague();
+      return data;
     } catch {
       return this.getDefaultData();
     }
@@ -398,8 +420,30 @@ const AppStorage = {
         numRounds: 5,
         gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random',
         assignSenteGote: true
-      }
+      },
+      league: this.getDefaultLeague()
     };
+  },
+
+  /** リーグ戦データの初期値 */
+  getDefaultLeague() {
+    return {
+      enabled:     false,  // この部屋でリーグ戦モードを使うか
+      currentTerm: 1,      // 現在の期（シーズン）
+      classes:     [],     // [{id, name}] 配列順が序列。先頭が最上位
+      members:     [],     // [{playerId, classId, status:'active'|'absent', joinedTerm}]
+      terms:       []      // [{term, matches:{[classId]:[...]}, finalized, changes:[...]}]
+    };
+  },
+
+  getLeague() {
+    return this.loadAll().league || this.getDefaultLeague();
+  },
+
+  saveLeague(league) {
+    const data = this.loadAll();
+    data.league = league;
+    this.saveAll(data);
   },
 
   addPlayer(player) {
@@ -465,6 +509,7 @@ const AppStorage = {
     if (supabaseClient && this.roomId) {
       supabaseClient.from('players').delete().eq('room_id', this.roomId).then();
       supabaseClient.from('rounds').delete().eq('room_id', this.roomId).then();
+      supabaseClient.from('leagues').delete().eq('room_id', this.roomId).then();
     }
   },
 
