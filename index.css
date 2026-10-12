@@ -1738,6 +1738,14 @@ body::before {
   opacity: 0.5;
 }
 
+.room-history-meta {
+  flex: 1;
+  margin: 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
 /* --- Room Info Bar (header) --- */
 .room-info-bar {
   display: flex;

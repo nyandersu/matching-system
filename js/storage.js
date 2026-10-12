@@ -231,6 +231,35 @@ const AppStorage = {
     return Array.from(buf, b => chars[b & 0x1f]).join('');
   },
 
+  /** 新しく作成した部屋を、ログイン中アカウントの所有部屋としてサーバーに登録 */
+  async registerOwnedRoom(roomId) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const session = this.getSession();
+    if (!session) throw new Error('ログインが必要です');
+    const { error } = await supabaseClient.rpc('room_register', {
+      p_account_id: session.accountId,
+      p_room_id:    roomId.toUpperCase().trim(),
+    });
+    if (error) throw new Error('部屋の登録に失敗しました');
+  },
+
+  /** ログイン中アカウントが作成した部屋の一覧（新しい順） */
+  async listOwnedRooms() {
+    if (!supabaseClient) return [];
+    const session = this.getSession();
+    if (!session) return [];
+    const { data, error } = await supabaseClient.rpc('room_list_mine', {
+      p_account_id: session.accountId,
+    });
+    if (error) throw new Error('部屋一覧の取得に失敗しました');
+    return (data || []).map(r => ({
+      roomId:      r.room_id,
+      createdAt:   r.created_at,
+      playerCount: Number(r.player_count) || 0,
+      roundCount:  Number(r.round_count) || 0,
+    }));
+  },
+
   /** 部屋をセットし、最近の部屋リストに追加 */
   setRoom(roomId) {
     this.roomId = roomId.toUpperCase().trim();
@@ -259,23 +288,34 @@ const AppStorage = {
    * - ローカルストレージのデータを削除
    * - Supabase の players / rounds / leagues も削除
    */
-  deleteRoom(roomId) {
+  /** 自分が作成した部屋を削除（サーバー側で作成者か確認し、データと所有記録をまとめて削除） */
+  async deleteRoom(roomId) {
     const rid = (roomId || '').toUpperCase().trim();
     if (!rid) return;
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const session = this.getSession();
+    if (!session) throw new Error('ログインが必要です');
 
-    // 最近使った部屋リストから除外
+    const { error } = await supabaseClient.rpc('room_delete_owned', {
+      p_account_id: session.accountId,
+      p_room_id:    rid,
+    });
+    if (error) {
+      if ((error.message || '').includes('not_owner')) {
+        throw new Error('自分が作成した部屋のみ削除できます');
+      }
+      throw new Error('部屋の削除に失敗しました');
+    }
+
+    this.removeFromRoomHistory(rid);
+    localStorage.removeItem(`shogi_${rid}`);
+  },
+
+  /** 最近参加した部屋リストから外す（部屋のデータは消さない） */
+  removeFromRoomHistory(roomId) {
+    const rid = (roomId || '').toUpperCase().trim();
     const history = this.getRoomHistory().filter(r => r !== rid);
     localStorage.setItem(this._getRoomHistoryKey(), JSON.stringify(history));
-
-    // ローカルデータ削除
-    localStorage.removeItem(`shogi_${rid}`);
-
-    // Supabase 上のデータ削除
-    if (supabaseClient) {
-      supabaseClient.from('players').delete().eq('room_id', rid).then().catch(console.warn);
-      supabaseClient.from('rounds').delete().eq('room_id', rid).then().catch(console.warn);
-      supabaseClient.from('leagues').delete().eq('room_id', rid).then().catch(console.warn);
-    }
   },
 
   // ============================================
