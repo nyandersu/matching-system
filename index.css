@@ -1284,7 +1284,8 @@ body::before {
   white-space: nowrap;
 }
 
-.display-chip {
+.display-chip,
+.sort-chip {
   padding: 5px 16px;
   border-radius: 20px;
   border: 1px solid var(--border);
@@ -1297,12 +1298,14 @@ body::before {
   transition: var(--transition-fast);
 }
 
-.display-chip:hover {
+.display-chip:hover,
+.sort-chip:hover {
   border-color: var(--amber);
   color: var(--text-primary);
 }
 
-.display-chip.active {
+.display-chip.active,
+.sort-chip.active {
   background: var(--amber-glow);
   border-color: rgba(230, 168, 23, 0.5);
   color: var(--amber-light);

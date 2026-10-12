@@ -472,6 +472,17 @@ const UI = {
     }
   },
 
+  playerSortKey: (() => {
+    try { return localStorage.getItem('shogi_player_sort') === 'rank' ? 'rank' : 'grade'; }
+    catch { return 'grade'; }
+  })(),
+
+  setPlayerSort(key) {
+    this.playerSortKey = key;
+    try { localStorage.setItem('shogi_player_sort', key); } catch {}
+    this.renderPlayers();
+  },
+
   renderPlayers() {
     const players = AppStorage.getPlayers();
     const container = document.getElementById('player-list');
@@ -492,14 +503,23 @@ const UI = {
     // リーグ戦モードではランクを使わない
     const leagueMode = !!(AppStorage.getLeague() || {}).enabled;
 
-    // 学年→ランク順にソート
-    const sorted = [...players].sort((a, b) => {
-      if (a.grade !== b.grade) return a.grade - b.grade;
-      const rankOrder = { S: 0, A: 1, B: 2, C: 3 };
-      return rankOrder[a.rank] - rankOrder[b.rank];
-    });
+    // 並び順：学年順（学年→ランク）／ランク順（ランク→学年）。リーグ戦モードは学年順のみ
+    const sortKey = leagueMode ? 'grade' : this.playerSortKey;
+    const rankOrder = { S: 0, A: 1, B: 2, C: 3 };
+    const byGrade = (a, b) => a.grade - b.grade;
+    const byRank  = (a, b) => (rankOrder[a.rank] ?? 9) - (rankOrder[b.rank] ?? 9);
+    const [first, second] = sortKey === 'rank' ? [byRank, byGrade] : [byGrade, byRank];
+    const sorted = [...players].sort((a, b) =>
+      first(a, b) || second(a, b) || a.name.localeCompare(b.name, 'ja'));
 
     container.innerHTML = `
+      ${leagueMode ? '' : `
+      <div class="display-opts-bar">
+        <span class="display-opts-label">並び順</span>
+        ${[['grade', '学年順'], ['rank', 'ランク順']].map(([key, label]) => `
+          <button type="button" class="sort-chip${sortKey === key ? ' active' : ''}"
+            aria-pressed="${sortKey === key}" onclick="UI.setPlayerSort('${key}')">${label}</button>`).join('')}
+      </div>`}
       <div class="player-table-wrapper">
         <table class="player-table">
           <thead>
