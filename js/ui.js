@@ -859,7 +859,7 @@ const UI = {
       return;
     }
 
-    let html = '';
+    let html = this.editMode ? '' : this.renderRankMatchupStats(rounds, playerMap);
     rounds.forEach((round, ri) => {
       html += `
         <div class="round-card">
@@ -930,6 +930,99 @@ const UI = {
     });
 
     container.innerHTML = html;
+  },
+
+  /**
+   * ランク帯別の対戦回数（平均）
+   * 選択したランク帯の選手1人あたり、各ランク帯の相手と平均何回当たるかを表示する。
+   * 「均等なら」は相手を全員から均等に選んだ場合の期待値（自分を除く人数比 × 対局数）。
+   */
+  rankStatsView: null,
+  rankStatsOpen: true,
+
+  renderRankMatchupStats(rounds, playerMap) {
+    const RANKS = Matching.RANKS;
+    const rankOf = (id, fallback) => playerMap[id]?.rank || fallback;
+
+    // 選手ごとの対戦相手ランク内訳
+    const perPlayer = {};
+    Object.values(playerMap).forEach(p => {
+      perPlayer[p.id] = { rank: p.rank, games: 0, vs: { S: 0, A: 0, B: 0, C: 0 } };
+    });
+    rounds.forEach(round => round.matches.forEach(m => {
+      const r1 = rankOf(m.player1Id, m.player1Rank);
+      const r2 = rankOf(m.player2Id, m.player2Rank);
+      const s1 = perPlayer[m.player1Id];
+      const s2 = perPlayer[m.player2Id];
+      if (s1 && r2 in s1.vs) { s1.vs[r2]++; s1.games++; }
+      if (s2 && r1 in s2.vs) { s2.vs[r1]++; s2.games++; }
+    }));
+
+    const counts = { S: 0, A: 0, B: 0, C: 0 };
+    Object.values(perPlayer).forEach(s => { if (s.rank in counts) counts[s.rank]++; });
+    const available = RANKS.filter(r => counts[r] > 0);
+    if (available.length === 0) return '';
+    if (!available.includes(this.rankStatsView)) this.rankStatsView = available[0];
+    const view = this.rankStatsView;
+
+    const members = Object.values(perPlayer).filter(s => s.rank === view);
+    const total   = Object.values(counts).reduce((a, b) => a + b, 0);
+    const fmt = n => (Math.round(n * 10) / 10).toFixed(1);
+
+    const rows = RANKS.filter(r => counts[r] > 0).map(r => {
+      const vals = members.map(s => s.vs[r]);
+      const avg  = vals.reduce((a, b) => a + b, 0) / members.length;
+      const min  = Math.min(...vals);
+      const max  = Math.max(...vals);
+      const others   = counts[r] - (r === view ? 1 : 0);
+      const expected = total > 1
+        ? members.reduce((a, s) => a + s.games * others / (total - 1), 0) / members.length
+        : 0;
+      return { r, avg, min, max, expected };
+    });
+    const maxAvg = Math.max(...rows.map(x => Math.max(x.avg, x.expected)), 0.0001);
+    const avgGames = members.reduce((a, s) => a + s.games, 0) / members.length;
+
+    return `
+      <details class="card rank-stats" ${this.rankStatsOpen ? 'open' : ''}
+        ontoggle="UI.rankStatsOpen = this.open">
+        <summary class="rank-stats-summary">
+          <span class="icon">📊</span> ランク帯別の対戦回数（平均）
+        </summary>
+        <div class="rank-stats-body">
+          <div class="rank-stats-views" role="tablist" aria-label="目線のランク帯">
+            <span class="rank-stats-views-label">目線</span>
+            ${available.map(r => `
+              <button type="button" role="tab" aria-selected="${r === view}"
+                class="rank-stats-view-btn${r === view ? ' active' : ''}"
+                onclick="UI.setRankStatsView('${r}')">
+                <span class="rank-badge rank-${r}">${r}</span>
+                <span class="rank-stats-view-count">${counts[r]}人</span>
+              </button>`).join('')}
+          </div>
+          <p class="rank-stats-caption">
+            <strong>${view}</strong> の選手1人あたり（平均 ${fmt(avgGames)} 局）が、各ランク帯と何回当たるか
+          </p>
+          <div class="rank-stats-rows">
+            ${rows.map(x => `
+              <div class="rank-stats-row">
+                <span class="rank-badge rank-${x.r}">${x.r}</span>
+                <div class="rank-stats-bar-track">
+                  <div class="rank-stats-bar rank-${x.r}" style="width:${(x.avg / maxAvg * 100).toFixed(1)}%"></div>
+                  <div class="rank-stats-expected" style="left:${(x.expected / maxAvg * 100).toFixed(1)}%" title="均等なら ${fmt(x.expected)} 回"></div>
+                </div>
+                <span class="rank-stats-avg">${fmt(x.avg)}<small>回</small></span>
+                <span class="rank-stats-range">${x.min === x.max ? `全員 ${x.min}回` : `${x.min}〜${x.max}回`}・均等なら ${fmt(x.expected)}</span>
+              </div>`).join('')}
+          </div>
+          <p class="rank-stats-note">縦線は、相手を全員から均等に選んだ場合の目安です。</p>
+        </div>
+      </details>`;
+  },
+
+  setRankStatsView(rank) {
+    this.rankStatsView = rank;
+    this.renderMatchingResult();
   },
 
   // ============================================
