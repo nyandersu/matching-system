@@ -153,12 +153,20 @@ const UI = {
     const overlay = document.getElementById('room-selector-overlay');
     overlay.classList.remove('hidden');
 
-    // 最近使った部屋を表示
-    this._renderRoomHistory();
+    // 自分が作成した部屋（サーバー）と最近参加した部屋（この端末）を表示
+    this._renderRoomLists();
 
-    // 新規作成ボタン
-    document.getElementById('room-create-btn').addEventListener('click', () => {
+    // 新規作成ボタン（作成した部屋はアカウントに紐づけて保存）
+    const createBtn = document.getElementById('room-create-btn');
+    createBtn.addEventListener('click', async () => {
       const newId = AppStorage.generateRoomId();
+      createBtn.disabled = true;
+      try {
+        await AppStorage.registerOwnedRoom(newId);
+      } catch (err) {
+        console.warn(err);
+        alert(`部屋をアカウントに登録できませんでした。\n部屋コード「${newId}」を控えておいてください。`);
+      }
       this._enterRoom(newId);
     });
 
@@ -180,44 +188,72 @@ const UI = {
     });
   },
 
-  /** 最近使った部屋リストを描画（入室・削除ボタン付き） */
-  _renderRoomHistory() {
-    const history = AppStorage.getRoomHistory();
-    const section = document.getElementById('room-history-section');
-    const list    = document.getElementById('room-history-list');
-    if (!section || !list) return;
+  /** 自分が作成した部屋（サーバー）と最近参加した部屋（この端末）を描画 */
+  async _renderRoomLists() {
+    const roomCodeRe = /^[A-Z0-9]{4,32}$/;
+    const renderList = (sectionId, listId, items, deleteTitle, onDelete) => {
+      const section = document.getElementById(sectionId);
+      const list    = document.getElementById(listId);
+      if (!section || !list) return;
+      section.classList.toggle('hidden', items.length === 0);
+      list.innerHTML = items.map(({ roomId, meta }) => `
+        <div class="room-history-item">
+          <button class="room-history-enter" data-room="${this.escapeHtml(roomId)}">
+            <span class="room-history-code">${this.escapeHtml(roomId)}</span>
+            ${meta ? `<span class="room-history-meta">${this.escapeHtml(meta)}</span>` : ''}
+            <span class="room-history-arrow">→</span>
+          </button>
+          <button class="room-history-delete" data-room="${this.escapeHtml(roomId)}" title="${deleteTitle}">✕</button>
+        </div>
+      `).join('');
+      list.querySelectorAll('.room-history-enter').forEach(btn => {
+        btn.addEventListener('click', () => this._enterRoom(btn.dataset.room));
+      });
+      list.querySelectorAll('.room-history-delete').forEach(btn => {
+        btn.addEventListener('click', () => onDelete(btn.dataset.room));
+      });
+    };
 
-    if (history.length === 0) {
-      section.classList.add('hidden');
-      return;
+    let owned = [];
+    try {
+      owned = await AppStorage.listOwnedRooms();
+    } catch (err) {
+      console.warn(err);
     }
-    section.classList.remove('hidden');
-    list.innerHTML = history.map(r => `
-      <div class="room-history-item">
-        <button class="room-history-enter" data-room="${this.escapeHtml(r)}">
-          <span class="room-history-code">${this.escapeHtml(r)}</span>
-          <span class="room-history-arrow">→</span>
-        </button>
-        <button class="room-history-delete" data-room="${this.escapeHtml(r)}" title="この部屋を削除">✕</button>
-      </div>
-    `).join('');
+    renderList('owned-rooms-section', 'owned-rooms-list',
+      owned.filter(r => roomCodeRe.test(r.roomId)).map(r => {
+        const date = new Date(r.createdAt);
+        const parts = [`${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}作成`, `${r.playerCount}人`];
+        if (r.roundCount > 0) parts.push(`${r.roundCount}回戦`);
+        return { roomId: r.roomId, meta: parts.join('・') };
+      }),
+      'この部屋を削除', roomId => this._deleteRoom(roomId));
 
-    list.querySelectorAll('.room-history-enter').forEach(btn => {
-      btn.addEventListener('click', () => this._enterRoom(btn.dataset.room));
-    });
-    list.querySelectorAll('.room-history-delete').forEach(btn => {
-      btn.addEventListener('click', () => this._deleteRoom(btn.dataset.room));
-    });
+    // 自分の部屋は上に出ているので、最近参加した部屋からは除外
+    // 他アカウントの部屋は削除できないため、✕は履歴から外すだけ
+    const ownedIds = new Set(owned.map(r => r.roomId));
+    renderList('room-history-section', 'room-history-list',
+      AppStorage.getRoomHistory()
+        .filter(r => roomCodeRe.test(r) && !ownedIds.has(r))
+        .map(r => ({ roomId: r, meta: '' })),
+      '履歴から外す', roomId => {
+        AppStorage.removeFromRoomHistory(roomId);
+        this._renderRoomLists();
+      });
   },
 
-  /** 部屋を削除（確認あり） */
-  _deleteRoom(roomId) {
+  /** 自分が作成した部屋を削除（確認あり） */
+  async _deleteRoom(roomId) {
     const msg = `部屋「${roomId}」を削除しますか？\n\n`
       + 'この部屋の選手・対戦表・リーグ戦データがすべて削除され、元に戻せません。';
     if (!confirm(msg)) return;
-    AppStorage.deleteRoom(roomId);
-    this._renderRoomHistory();
-    this.showToast(`部屋「${roomId}」を削除しました`, 'info');
+    try {
+      await AppStorage.deleteRoom(roomId);
+      this.showToast(`部屋「${roomId}」を削除しました`, 'info');
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+    this._renderRoomLists();
   },
 
   _joinRoomFromInput() {
