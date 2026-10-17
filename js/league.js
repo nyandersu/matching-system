@@ -497,8 +497,8 @@ const League = {
       const rowWins = next === 'win';
       res = (rowWins === rowIsP1) ? 'p1' : 'p2';
     }
-    m.result = res;
-    AppStorage.saveLeague(league);
+    // 1局だけ保存（他の端末が入力した結果を上書きしない）
+    AppStorage.setLeagueMatchResult(term.term, classId, matchId, res);
     this.render();
   },
 
@@ -671,8 +671,8 @@ const League = {
     const term = this._getCurrentTerm(league);
     const m = (term.matches[classId] || []).find(mm => mm.id === matchId);
     if (!m) return;
-    m.result = result;  // 'p1' | 'p2' | 'draw' | null
-    AppStorage.saveLeague(league);
+    // 'p1' | 'p2' | 'draw' | null。1局だけ保存（他の端末が入力した結果を上書きしない）
+    AppStorage.setLeagueMatchResult(term.term, classId, matchId, result);
     this.render();
   },
 

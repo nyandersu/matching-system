@@ -10,6 +10,16 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
+  // サーバー側でセッションが無効（期限切れ・他端末でパスワード変更など）ならログイン画面へ
+  const backToLogin = () => {
+    AppStorage.clearSession();
+    window.location.href = window.location.pathname;
+  };
+  AppStorage.onSessionInvalid = backToLogin;
+  AppStorage.validateSession().then(valid => {
+    if (valid === false) backToLogin();
+  });
+
   // 2. 部屋チェック
   const params    = new URLSearchParams(window.location.search);
   const roomParam = params.get('room');

@@ -6,12 +6,31 @@
 
 const SUPABASE_URL = 'https://nwxpgvefyjzabuwdtrii.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_jI0RZ1qkuXdOeacCNX928A_m8dRQGwV';
-const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const SESSION_KEY = 'shogi_session';  // ログインセッション
 
+/**
+ * Supabase クライアント。
+ * サーバー側の RLS は「有効なセッション」かつ「x-room-id の部屋」の行だけを許可するため、
+ * ページ読み込み時点のセッショントークンと URL の部屋コードをヘッダーに付ける
+ * （ログイン・部屋の切り替えはいずれもページ遷移を伴うので、読み込み時に決めれば足りる）。
+ */
+const supabaseClient = (() => {
+  if (!window.supabase) return null;
+  const headers = {};
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+    if (s && s.token) headers['x-session-token'] = s.token;
+  } catch {}
+  const room = (new URLSearchParams(window.location.search).get('room') || '').toUpperCase().trim();
+  if (/^[A-Z0-9]{4,32}$/.test(room)) headers['x-room-id'] = room;
+  return window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+    global: { headers },
+    auth:   { persistSession: false, autoRefreshToken: false },
+  });
+})();
+
 const AppStorage = {
-  _isSyncing: false,
   roomId: null,   // 現在の部屋ID（null = 未選択）
 
   // ============================================
@@ -23,6 +42,11 @@ const AppStorage = {
     try {
       const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
       if (!s) return null;
+      // セッショントークン導入前のセッションは無効（再ログインが必要）
+      if (!s.token) {
+        this.clearSession();
+        return null;
+      }
       const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7日
       if (s.createdAt && Date.now() - s.createdAt > SESSION_TTL_MS) {
         this.clearSession();
@@ -35,15 +59,38 @@ const AppStorage = {
   },
 
   /** セッション保存（作成時刻付き） */
-  saveSession(accountId, username) {
+  saveSession(accountId, username, token) {
     localStorage.setItem(SESSION_KEY, JSON.stringify({
-      accountId, username, createdAt: Date.now()
+      accountId, username, token, createdAt: Date.now()
     }));
   },
 
-  /** ログアウト */
+  /** ローカルのセッション情報を消す */
   clearSession() {
     localStorage.removeItem(SESSION_KEY);
+  },
+
+  /** ログアウト（サーバー側のセッションも無効化） */
+  async logout() {
+    if (supabaseClient && this.getSession()) {
+      try { await supabaseClient.rpc('auth_logout'); } catch {}
+    }
+    this.clearSession();
+  },
+
+  /**
+   * サーバー側でセッションが有効か確認する。
+   * @returns {Promise<boolean|null>} true=有効 / false=無効 / null=確認できない（オフライン等）
+   */
+  async validateSession() {
+    if (!supabaseClient || !this.getSession()) return null;
+    try {
+      const { data, error } = await supabaseClient.rpc('auth_session');
+      if (error) return null;
+      return Array.isArray(data) && data.length > 0;
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -80,7 +127,7 @@ const AppStorage = {
     }
 
     this._clearLoginFailures(uname);
-    this.saveSession(row.account_id, row.account_username);
+    this.saveSession(row.account_id, row.account_username, row.session_token);
     return { id: row.account_id, username: row.account_username };
   },
 
@@ -120,7 +167,7 @@ const AppStorage = {
 
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) throw new Error('アカウント作成に失敗しました');
-    this.saveSession(row.account_id, row.account_username);
+    this.saveSession(row.account_id, row.account_username, row.session_token);
     return { id: row.account_id, username: row.account_username };
   },
 
@@ -136,8 +183,7 @@ const AppStorage = {
       throw new Error('このパスワードは推測されやすいため使用できません');
     }
 
-    const { error } = await supabaseClient.rpc('auth_update_password', {
-      p_account_id:       session.accountId,
+    const { error } = await supabaseClient.rpc('auth_change_password', {
       p_current_password: currentPassword,
       p_new_password:     newPassword,
     });
@@ -236,9 +282,8 @@ const AppStorage = {
     if (!supabaseClient) throw new Error('Supabase未接続');
     const session = this.getSession();
     if (!session) throw new Error('ログインが必要です');
-    const { error } = await supabaseClient.rpc('room_register', {
-      p_account_id: session.accountId,
-      p_room_id:    roomId.toUpperCase().trim(),
+    const { error } = await supabaseClient.rpc('my_room_register', {
+      p_room_id: roomId.toUpperCase().trim(),
     });
     if (error) throw new Error('部屋の登録に失敗しました');
   },
@@ -248,9 +293,7 @@ const AppStorage = {
     if (!supabaseClient) return [];
     const session = this.getSession();
     if (!session) return [];
-    const { data, error } = await supabaseClient.rpc('room_list_mine', {
-      p_account_id: session.accountId,
-    });
+    const { data, error } = await supabaseClient.rpc('my_room_list');
     if (error) throw new Error('部屋一覧の取得に失敗しました');
     return (data || []).map(r => ({
       roomId:      r.room_id,
@@ -282,12 +325,6 @@ const AppStorage = {
     localStorage.setItem(this._getRoomHistoryKey(), JSON.stringify(history.slice(0, 5)));
   },
 
-  /**
-   * 部屋を完全に削除する。
-   * - 最近使った部屋リストから除外
-   * - ローカルストレージのデータを削除
-   * - Supabase の players / rounds / leagues も削除
-   */
   /** 自分が作成した部屋を削除（サーバー側で作成者か確認し、データと所有記録をまとめて削除） */
   async deleteRoom(roomId) {
     const rid = (roomId || '').toUpperCase().trim();
@@ -296,9 +333,8 @@ const AppStorage = {
     const session = this.getSession();
     if (!session) throw new Error('ログインが必要です');
 
-    const { error } = await supabaseClient.rpc('room_delete_owned', {
-      p_account_id: session.accountId,
-      p_room_id:    rid,
+    const { error } = await supabaseClient.rpc('my_room_delete', {
+      p_room_id: rid,
     });
     if (error) {
       if ((error.message || '').includes('not_owner')) {
@@ -319,140 +355,192 @@ const AppStorage = {
   },
 
   // ============================================
-  // リアルタイム同期
+  // 同期（端末間）
   // ============================================
+  //
+  // - 保存は「変更した1件だけ」をサーバーに書く（結果は1局単位の RPC）。
+  //   他の端末が入力した結果を、古いローカルデータで上書きしないため。
+  // - 書き込みが終わったら同じ部屋の端末へ broadcast で通知し、受け取った側は再取得する。
+  // - 書き込みは順番どおりに送るためキューで直列化する。
+
+  _writeQueue: Promise.resolve(),
+  _localVersion: 0,
+  _channel: null,
+  _onRemoteUpdate: null,
+  _refetchTimer: null,
 
   initRealtime(onUpdateCallback) {
-    if (!supabaseClient) return;
+    if (!supabaseClient || !this.roomId) return;
+    this._onRemoteUpdate = onUpdateCallback;
 
-    this.fetchFromSupabase().then(() => {
+    this.fetchFromSupabase({ initial: true }).then(() => {
       if (onUpdateCallback) onUpdateCallback();
     });
 
-    supabaseClient
-      .channel(`room:${this.roomId}`)
-      .on('postgres_changes', { event: '*', schema: 'public' }, () => {
-        this.fetchFromSupabase().then(() => {
-          if (onUpdateCallback) onUpdateCallback();
-        });
-      })
+    this._channel = supabaseClient
+      .channel(`room:${this.roomId}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'changed' }, () => this._scheduleRefetch())
       .subscribe();
+
+    // 画面に戻ってきたとき（スリープ復帰など）に取りこぼしを補う
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this._scheduleRefetch();
+    });
   },
 
-  // ============================================
-  // Supabase 同期
-  // ============================================
+  _scheduleRefetch() {
+    clearTimeout(this._refetchTimer);
+    this._refetchTimer = setTimeout(async () => {
+      await this.fetchFromSupabase();
+      if (this._onRemoteUpdate) this._onRemoteUpdate();
+    }, 300);
+  },
 
-  async fetchFromSupabase() {
+  /** 同じ部屋の他の端末に「変更あり」を通知 */
+  _notifyChanged() {
+    if (!this._channel) return;
+    this._channel.send({ type: 'broadcast', event: 'changed', payload: {} }).catch(() => {});
+  },
+
+  /**
+   * サーバーへの書き込みをキューに積む。
+   * 失敗したら（他端末で確定済み・オフラインなど）サーバーの状態を取り直して画面に反映する。
+   */
+  _remote(label, fn) {
     if (!supabaseClient || !this.roomId) return;
-    try {
-      this._isSyncing = true;
+    this._writeQueue = this._writeQueue.then(async () => {
+      try {
+        const res = await fn();
+        const err = res && res.error;
+        if (err) throw err;
+        this._notifyChanged();
+      } catch (err) {
+        console.warn(`Supabaseへの保存に失敗（${label}）:`, err);
+        this._scheduleRefetch();
+      }
+    });
+  },
 
-      const [sQuery, pQuery, rQuery, lQuery] = await Promise.all([
-        // 設定は部屋ごと（id = 部屋コード）
-        supabaseClient.from('settings').select('*').eq('id', this.roomId).maybeSingle(),
-        supabaseClient.from('players').select('*').eq('room_id', this.roomId),
-        supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number'),
-        supabaseClient.from('leagues').select('data').eq('room_id', this.roomId).maybeSingle()
-      ]);
+  _playerRow(p) {
+    return {
+      id: p.id, name: p.name, grade: p.grade, rank: p.rank,
+      rating: p.rating ?? null,
+      room_id: this.roomId,
+    };
+  },
 
-      // leagues テーブルのエラーは致命的としない（テーブル未作成の旧環境互換）
-      if (sQuery.error || pQuery.error || rQuery.error) {
-        throw new Error('Database fetch error');
+  _roundRow(r) {
+    return {
+      room_id:       this.roomId,
+      round_number:  r.roundNumber,
+      matches:       r.matches,
+      bye_player_id: r.byePlayerId,
+      confirmed:     !!r.confirmed,
+    };
+  },
+
+  _settingsRow(settings) {
+    return {
+      id:                this.roomId,
+      num_rounds:        settings.numRounds,
+      bye_counts_as_win: true,   // 常に不戦勝扱い
+      strength_mode:     settings.strengthMode === 'rating' ? 'rating' : 'rank',
+    };
+  },
+
+  _leagueHasContent(league) {
+    return !!league && (league.enabled || (league.classes || []).length > 0 || (league.terms || []).length > 0);
+  },
+
+  /**
+   * サーバーから部屋のデータを取得してローカルに反映する。
+   * - 通常はサーバーを正とする（他端末での削除も反映）
+   * - initial（ページ読み込み時）は、サーバーが空でローカルにデータがある場合に限り
+   *   ローカルをサーバーへ送る（オフラインで作ったデータの初回同期）
+   * - セッションが無効なときは何も反映しない（RLS で空に見えるため）
+   */
+  async fetchFromSupabase({ initial = false } = {}) {
+    if (!supabaseClient || !this.roomId) return;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this._writeQueue;               // 自分の未送信の書き込みを先に反映させる
+      const versionAtStart = this._localVersion;
+
+      let sQuery, pQuery, rQuery, lQuery, authQuery;
+      try {
+        [authQuery, sQuery, pQuery, rQuery, lQuery] = await Promise.all([
+          supabaseClient.rpc('auth_session'),
+          supabaseClient.from('settings').select('*').eq('id', this.roomId).maybeSingle(),
+          supabaseClient.from('players').select('*').eq('room_id', this.roomId),
+          supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number'),
+          supabaseClient.from('leagues').select('data').eq('room_id', this.roomId).maybeSingle(),
+        ]);
+      } catch (e) {
+        console.warn('Supabaseからのデータ取得に失敗しました(オフラインの可能性があります):', e);
+        return;
       }
 
-      // 既存のローカルデータをベースにして Supabase のデータで上書き
-      // （settings の Supabase 非管理フィールドを保持するため）
+      if (authQuery.error || sQuery.error || pQuery.error || rQuery.error) {
+        console.warn('Supabaseからのデータ取得に失敗しました:', authQuery.error || sQuery.error || pQuery.error || rQuery.error);
+        return;
+      }
+      if (!Array.isArray(authQuery.data) || authQuery.data.length === 0) {
+        console.warn('セッションが無効なため同期を停止しました');
+        if (this.onSessionInvalid) this.onSessionInvalid();
+        return;
+      }
+
+      // 取得中にローカルで変更があったら、その書き込みを待ってから取り直す
+      if (this._localVersion !== versionAtStart) continue;
+
       const data = this.loadAll();
 
       if (sQuery.data) {
         data.settings.numRounds    = sQuery.data.num_rounds;
         data.settings.strengthMode = sQuery.data.strength_mode === 'rating' ? 'rating' : 'rank';
+      } else if (initial) {
+        this._remote('設定', () => supabaseClient.from('settings').upsert(this._settingsRow(data.settings)));
       }
 
-      // Supabase が実際にデータを持っている場合のみ上書き
-      // 空配列 [] は truthy なので length チェックが必要
-      // → Supabase にデータがない（同期失敗・オフライン生成）場合はローカルを保持する
-      if (pQuery.data && pQuery.data.length > 0) {
-        data.players = pQuery.data.map(p => ({
+      const remotePlayers = pQuery.data || [];
+      if (remotePlayers.length > 0 || !initial) {
+        data.players = remotePlayers.map(p => ({
           id: p.id, name: p.name, grade: p.grade, rank: p.rank,
-          rating: p.rating == null ? null : Number(p.rating)
+          rating: p.rating == null ? null : Number(p.rating),
         }));
+      } else if (data.players.length > 0) {
+        this._remote('選手', () => supabaseClient.from('players').upsert(data.players.map(p => this._playerRow(p))));
       }
 
-      if (rQuery.data && rQuery.data.length > 0) {
-        data.rounds = rQuery.data.map(r => {
-          const local = data.rounds.find(lr => lr.roundNumber === r.round_number);
-          return {
-            roundNumber:  r.round_number,
-            matches:      r.matches,
-            byePlayerId:  r.bye_player_id,
-            confirmed:    local?.confirmed || false,
-          };
-        });
+      const remoteRounds = rQuery.data || [];
+      if (remoteRounds.length > 0 || !initial) {
+        data.rounds = remoteRounds.map(r => ({
+          roundNumber: r.round_number,
+          matches:     r.matches,
+          byePlayerId: r.bye_player_id,
+          confirmed:   !!r.confirmed,
+        }));
+      } else if (data.rounds.length > 0) {
+        this._remote('対戦表', () => supabaseClient.from('rounds').upsert(data.rounds.map(r => this._roundRow(r))));
       }
 
-      // リーグデータ：Supabase に存在すればそれを採用
-      if (lQuery && !lQuery.error && lQuery.data && lQuery.data.data) {
-        const remoteLeague = lQuery.data.data;
+      // leagues テーブルのエラーは致命的としない（テーブル未作成の旧環境互換）
+      if (lQuery && !lQuery.error) {
+        const remoteLeague = lQuery.data && lQuery.data.data;
         if (remoteLeague && typeof remoteLeague === 'object') {
           data.league = { ...this.getDefaultLeague(), ...remoteLeague };
+        } else if (initial && this._leagueHasContent(data.league)) {
+          const league = data.league;
+          this._remote('リーグ戦', () => supabaseClient.from('leagues').upsert({
+            room_id: this.roomId, data: league, updated_at: new Date().toISOString(),
+          }));
+        } else if (!initial) {
+          data.league = this.getDefaultLeague();
         }
       }
 
-      localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
-      this._isSyncing = false;
-    } catch (e) {
-      console.warn('Supabaseからのデータ取得に失敗しました(オフラインの可能性があります):', e);
-      this._isSyncing = false;
-    }
-  },
-
-  async syncToSupabase(data) {
-    if (!supabaseClient || this._isSyncing || !this.roomId) return;
-
-    try {
-      await supabaseClient.from('settings').upsert({
-        id: this.roomId,
-        num_rounds:        data.settings.numRounds,
-        bye_counts_as_win: true,   // 常に不戦勝扱い
-        strength_mode:     data.settings.strengthMode === 'rating' ? 'rating' : 'rank'
-      });
-
-      if (data.players.length > 0) {
-        await supabaseClient.from('players').upsert(
-          data.players.map(p => ({
-            id: p.id, name: p.name, grade: p.grade, rank: p.rank,
-            rating: p.rating ?? null,
-            room_id: this.roomId
-          }))
-        );
-      }
-
-      if (data.rounds.length === 0) {
-        await supabaseClient.from('rounds').delete()
-          .eq('room_id', this.roomId);
-      } else {
-        await supabaseClient.from('rounds').upsert(
-          data.rounds.map(r => ({
-            room_id:       this.roomId,
-            round_number:  r.roundNumber,
-            matches:       r.matches,
-            bye_player_id: r.byePlayerId
-          }))
-        );
-      }
-
-      // リーグデータの同期（部屋ごと1行の JSONB）
-      if (data.league) {
-        await supabaseClient.from('leagues').upsert({
-          room_id:    this.roomId,
-          data:       data.league,
-          updated_at: new Date().toISOString()
-        });
-      }
-    } catch (err) {
-      console.warn('Supabaseへの同期に失敗:(オフライン)', err);
+      this._writeLocal(data);
+      return;
     }
   },
 
@@ -473,13 +561,18 @@ const AppStorage = {
     }
   },
 
-  saveAll(data) {
+  /** ローカルにだけ保存（サーバーへの送信は各操作で個別に行う） */
+  _writeLocal(data) {
     try {
       localStorage.setItem(this.getStorageKey(), JSON.stringify(data));
-      this.syncToSupabase(data);
     } catch (e) {
       console.error('ローカル保存失敗:', e);
     }
+  },
+
+  _saveLocal(data) {
+    this._localVersion++;
+    this._writeLocal(data);
   },
 
   getDefaultData() {
@@ -512,17 +605,44 @@ const AppStorage = {
     return this.loadAll().league || this.getDefaultLeague();
   },
 
+  /** リーグ戦データ全体を保存（クラス編集・総当たり生成など構造の変更用） */
   saveLeague(league) {
     const data = this.loadAll();
     data.league = league;
-    this.saveAll(data);
+    this._saveLocal(data);
+    this._remote('リーグ戦', () => supabaseClient.from('leagues').upsert({
+      room_id: this.roomId, data: league, updated_at: new Date().toISOString(),
+    }));
+  },
+
+  /** リーグ戦の対局結果を1局だけ保存（他の端末の入力を上書きしない） */
+  setLeagueMatchResult(term, classId, matchId, result) {
+    const data = this.loadAll();
+    const t = (data.league.terms || []).find(tt => tt.term === term);
+    const m = t && (t.matches[classId] || []).find(mm => mm.id === matchId);
+    if (!m) return;
+    m.result = result;
+    this._saveLocal(data);
+    this._remote('リーグ戦の結果', async () => {
+      const res = await supabaseClient.rpc('league_set_result', {
+        p_term: term, p_class_id: classId, p_match_id: matchId, p_result: result,
+      });
+      // サーバーにまだ無い期・対局ならリーグ全体を保存
+      if (res.error && /league_not_found|term_not_found|match_not_found/.test(res.error.message || '')) {
+        return supabaseClient.from('leagues').upsert({
+          room_id: this.roomId, data: this.loadAll().league, updated_at: new Date().toISOString(),
+        });
+      }
+      return res;
+    });
   },
 
   addPlayer(player) {
     const data = this.loadAll();
     player.id = this.generateId();
     data.players.push(player);
-    this.saveAll(data);
+    this._saveLocal(data);
+    this._remote('選手の追加', () => supabaseClient.from('players').upsert(this._playerRow(player)));
     return player;
   },
 
@@ -531,58 +651,92 @@ const AppStorage = {
     const idx = data.players.findIndex(p => p.id === id);
     if (idx === -1) return null;
     data.players[idx] = { ...data.players[idx], ...updates };
-    this.saveAll(data);
-    return data.players[idx];
+    const player = data.players[idx];
+    this._saveLocal(data);
+    this._remote('選手の更新', () => supabaseClient.from('players').upsert(this._playerRow(player)));
+    return player;
   },
 
   deletePlayer(id) {
     const data = this.loadAll();
     data.players = data.players.filter(p => p.id !== id);
-    this.saveAll(data);
-    if (supabaseClient) {
-      supabaseClient.from('players').delete().eq('id', id).then().catch(console.warn);
-    }
+    this._saveLocal(data);
+    this._remote('選手の削除', () => supabaseClient.from('players').delete().eq('id', id).eq('room_id', this.roomId));
   },
 
   getPlayers()  { return this.loadAll().players; },
   getRounds()   { return this.loadAll().rounds; },
   getSettings() { return this.loadAll().settings; },
 
+  /** 対戦表全体を置き換える（生成・クリア・手動編集） */
   saveRounds(rounds) {
     const data = this.loadAll();
     data.rounds = rounds;
-    this.saveAll(data);
+    this._saveLocal(data);
+    const rows = rounds.map(r => this._roundRow(r));
+    const maxRound = rounds.reduce((m, r) => Math.max(m, r.roundNumber), 0);
+    this._remote('対戦表', async () => {
+      if (rows.length > 0) {
+        const res = await supabaseClient.from('rounds').upsert(rows);
+        if (res.error) return res;
+      }
+      return supabaseClient.from('rounds').delete().eq('room_id', this.roomId).gt('round_number', maxRound);
+    });
   },
 
+  /** 1回戦分を追加（スイスドロー。既存の回戦の結果には触れない） */
+  appendRound(round) {
+    const data = this.loadAll();
+    data.rounds.push(round);
+    this._saveLocal(data);
+    this._remote('対戦表の追加', () => supabaseClient.from('rounds').upsert(this._roundRow(round)));
+  },
+
+  /** 対局結果を1局だけ保存（他の端末の入力を上書きしない） */
   updateMatchResult(roundIndex, matchIndex, result) {
     const data = this.loadAll();
-    if (data.rounds[roundIndex]?.matches[matchIndex]) {
-      data.rounds[roundIndex].matches[matchIndex].result = result;
-      this.saveAll(data);
-    }
+    const round = data.rounds[roundIndex];
+    if (!round?.matches[matchIndex]) return;
+    round.matches[matchIndex].result = result;
+    this._saveLocal(data);
+    this._remote('結果', () => supabaseClient.rpc('round_set_result', {
+      p_round: round.roundNumber, p_match_index: matchIndex, p_result: result,
+    }));
   },
 
   setRoundConfirmed(roundIndex, confirmed) {
     const data = this.loadAll();
-    if (data.rounds[roundIndex]) {
-      data.rounds[roundIndex].confirmed = confirmed;
-      this.saveAll(data);
-    }
+    const round = data.rounds[roundIndex];
+    if (!round) return;
+    round.confirmed = confirmed;
+    this._saveLocal(data);
+    this._remote('確定', () => supabaseClient.rpc('round_set_confirmed', {
+      p_round: round.roundNumber, p_confirmed: confirmed,
+    }));
   },
 
   updateSettings(settings) {
     const data = this.loadAll();
+    const before = data.settings;
     data.settings = { ...data.settings, ...settings };
-    this.saveAll(data);
+    this._saveLocal(data);
+    // サーバーで共有するのはラウンド数と強さの入力方式のみ（他は端末ごとの設定）
+    if (before.numRounds !== data.settings.numRounds || before.strengthMode !== data.settings.strengthMode) {
+      const row = this._settingsRow(data.settings);
+      this._remote('設定', () => supabaseClient.from('settings').upsert(row));
+    }
   },
 
   resetAll() {
     localStorage.removeItem(this.getStorageKey());
-    if (supabaseClient && this.roomId) {
-      supabaseClient.from('players').delete().eq('room_id', this.roomId).then();
-      supabaseClient.from('rounds').delete().eq('room_id', this.roomId).then();
-      supabaseClient.from('leagues').delete().eq('room_id', this.roomId).then();
-    }
+    this._localVersion++;
+    this._remote('全データリセット', async () => {
+      for (const table of ['players', 'rounds', 'leagues']) {
+        const res = await supabaseClient.from(table).delete().eq('room_id', this.roomId);
+        if (res.error) return res;
+      }
+      return null;
+    });
   },
 
   generateId() {
