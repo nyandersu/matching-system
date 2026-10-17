@@ -6,6 +6,30 @@ const UI = {
   currentTab: 'players',
   editingPlayerId: null,
   displayOpts: { showGrade: true, showRank: true },
+
+  /** レーティングモードか（リーグ戦モード中は常にランク扱い） */
+  isRatingMode() {
+    if ((AppStorage.getLeague() || {}).enabled) return false;
+    return AppStorage.getSettings().strengthMode === 'rating';
+  },
+
+  /** レーティングの表示用文字列（未入力は —） */
+  formatRating(rating) {
+    if (Matching.hasNoRating({ rating })) return '—';
+    return String(Math.round(Number(rating) * 10) / 10);
+  },
+
+  /**
+   * 対戦表などでの強さの表示。
+   * ランクモード：対戦表生成時のランク（snapshotRank）のバッジ
+   * レーティングモード：選手の現在のレーティング
+   */
+  strengthBadgeHtml(playerId, snapshotRank, playerMap, ratingMode) {
+    if (ratingMode) {
+      return `<span class="rating-badge">${this.escapeHtml(this.formatRating(playerMap[playerId]?.rating))}</span>`;
+    }
+    return `<span class="rank-badge rank-${snapshotRank}">${snapshotRank}</span>`;
+  },
   standingsOpts: { showPoints: true },
 
   // 手動編集モード
@@ -337,13 +361,46 @@ const UI = {
     // リーグ戦モードではランクを使わないため、選手登録フォームの
     // ランク欄を隠す（hidden な required はフォーム送信を妨げるため
     // required も外す）
-    const rankGroup  = document.getElementById('player-rank-group');
-    const rankSelect = document.getElementById('player-rank');
-    if (rankGroup)  rankGroup.classList.toggle('hidden', enabled);
+    // レーティングモードではランク欄の代わりにレーティング欄を出す
+    const ratingMode   = this.isRatingMode();
+    const hideRank     = enabled || ratingMode;
+    const rankGroup    = document.getElementById('player-rank-group');
+    const rankSelect   = document.getElementById('player-rank');
+    const ratingGroup  = document.getElementById('player-rating-group');
+    const ratingInput  = document.getElementById('player-rating');
+    if (rankGroup)  rankGroup.classList.toggle('hidden', hideRank);
     if (rankSelect) {
-      if (enabled) rankSelect.removeAttribute('required');
-      else         rankSelect.setAttribute('required', '');
+      if (hideRank) rankSelect.removeAttribute('required');
+      else          rankSelect.setAttribute('required', '');
     }
+    if (ratingGroup) ratingGroup.classList.toggle('hidden', !ratingMode);
+    if (ratingInput) {
+      if (ratingMode) ratingInput.setAttribute('required', '');
+      else            ratingInput.removeAttribute('required');
+    }
+
+    // 強さの入力方式の切り替え（リーグ戦ではランクを使わないため非表示）
+    const modeBar = document.getElementById('strength-mode-bar');
+    if (modeBar) {
+      modeBar.classList.toggle('hidden', enabled);
+      modeBar.querySelectorAll('.sort-chip').forEach(chip => {
+        const active = chip.dataset.mode === (ratingMode ? 'rating' : 'rank');
+        chip.classList.toggle('active', active);
+        chip.setAttribute('aria-pressed', active);
+      });
+    }
+
+    // マッチング設定・表示項目の文言
+    const rankLabel = document.getElementById('rank-balance-label');
+    if (rankLabel) {
+      rankLabel.textContent = ratingMode
+        ? '対戦相手の強さの散らばり（上位〜下位をまんべんなく）'
+        : '対戦相手のランク帯の均等化';
+    }
+    document.getElementById('mean-balance-group')?.classList.toggle('hidden', !ratingMode);
+    document.querySelectorAll('.display-chip[data-key="rank"]').forEach(chip => {
+      chip.textContent = ratingMode ? 'レーティング' : 'ランク';
+    });
 
     // リーグ有効化でトーナメントタブが隠れた場合、そのタブにいたらリーグ戦へ退避
     const activePanel = document.querySelector('.tab-panel.active');
@@ -398,6 +455,27 @@ const UI = {
     cancelBtn.addEventListener('click', () => {
       this.resetPlayerForm();
     });
+
+    // 強さの入力方式（ランク／レーティング）の切り替え。部屋ごとに保存・同期される
+    document.querySelectorAll('#strength-mode-bar .sort-chip').forEach(chip => {
+      chip.addEventListener('click', () => this.setStrengthMode(chip.dataset.mode));
+    });
+  },
+
+  setStrengthMode(mode) {
+    const next = mode === 'rating' ? 'rating' : 'rank';
+    if ((AppStorage.getSettings().strengthMode || 'rank') === next) return;
+    AppStorage.updateSettings({ strengthMode: next });
+    this.applyLeagueMode();
+    this.renderAll();
+    if (next === 'rating') {
+      const missing = AppStorage.getPlayers().filter(p => Matching.hasNoRating(p)).length;
+      this.showToast(missing > 0
+        ? `レーティングモードにしました。${missing}人のレーティングが未入力です`
+        : 'レーティングモードにしました', 'info');
+    } else {
+      this.showToast('ランクモードにしました', 'info');
+    }
   },
 
   handlePlayerSubmit() {
@@ -412,6 +490,11 @@ const UI = {
       rank = this.editingPlayerId
         ? (AppStorage.getPlayers().find(p => p.id === this.editingPlayerId)?.rank || 'C')
         : 'C';
+    } else if (this.isRatingMode()) {
+      // レーティングモードではランクを入力しない。編集時は既存ランクを保持
+      rank = this.editingPlayerId
+        ? (AppStorage.getPlayers().find(p => p.id === this.editingPlayerId)?.rank || 'C')
+        : 'C';
     } else {
       rank = document.getElementById('player-rank').value;
     }
@@ -421,11 +504,22 @@ const UI = {
       return;
     }
 
+    const updates = { name, grade, rank };
+    if (this.isRatingMode()) {
+      const raw = document.getElementById('player-rating').value.trim();
+      const rating = Number(raw);
+      if (raw === '' || !Number.isFinite(rating) || rating < -99999 || rating > 99999) {
+        this.showToast('レーティングを数値で入力してください', 'error');
+        return;
+      }
+      updates.rating = rating;
+    }
+
     if (this.editingPlayerId) {
-      AppStorage.updatePlayer(this.editingPlayerId, { name, grade, rank });
+      AppStorage.updatePlayer(this.editingPlayerId, updates);
       this.showToast(`${name} を更新しました`, 'success');
     } else {
-      AppStorage.addPlayer({ name, grade, rank });
+      AppStorage.addPlayer(updates);
       this.showToast(`${name} を追加しました`, 'success');
     }
 
@@ -451,6 +545,7 @@ const UI = {
     document.getElementById('player-name').value = player.name;
     document.getElementById('player-grade').value = player.grade;
     document.getElementById('player-rank').value = player.rank;
+    document.getElementById('player-rating').value = Matching.hasNoRating(player) ? '' : player.rating;
     document.getElementById('form-title').textContent = '選手を編集';
     document.getElementById('submit-btn').textContent = '更新';
     document.getElementById('cancel-edit-btn').classList.remove('hidden');
@@ -503,11 +598,17 @@ const UI = {
     // リーグ戦モードではランクを使わない
     const leagueMode = !!(AppStorage.getLeague() || {}).enabled;
 
-    // 並び順：学年順（学年→ランク）／ランク順（ランク→学年）。リーグ戦モードは学年順のみ
+    const ratingMode = this.isRatingMode();
+    const strengthLabel = ratingMode ? 'レーティング' : 'ランク';
+
+    // 並び順：学年順（学年→強さ）／ランク順・レーティング順（強さ→学年）。リーグ戦モードは学年順のみ
     const sortKey = leagueMode ? 'grade' : this.playerSortKey;
     const rankOrder = { S: 0, A: 1, B: 2, C: 3 };
+    const ratingValue = p => Matching.hasNoRating(p) ? -Infinity : Number(p.rating);
     const byGrade = (a, b) => a.grade - b.grade;
-    const byRank  = (a, b) => (rankOrder[a.rank] ?? 9) - (rankOrder[b.rank] ?? 9);
+    const byRank  = ratingMode
+      ? (a, b) => ratingValue(b) - ratingValue(a) || 0
+      : (a, b) => (rankOrder[a.rank] ?? 9) - (rankOrder[b.rank] ?? 9);
     const [first, second] = sortKey === 'rank' ? [byRank, byGrade] : [byGrade, byRank];
     const sorted = [...players].sort((a, b) =>
       first(a, b) || second(a, b) || a.name.localeCompare(b.name, 'ja'));
@@ -516,7 +617,7 @@ const UI = {
       ${leagueMode ? '' : `
       <div class="display-opts-bar">
         <span class="display-opts-label">並び順</span>
-        ${[['grade', '学年順'], ['rank', 'ランク順']].map(([key, label]) => `
+        ${[['grade', '学年順'], ['rank', `${strengthLabel}順`]].map(([key, label]) => `
           <button type="button" class="sort-chip${sortKey === key ? ' active' : ''}"
             aria-pressed="${sortKey === key}" onclick="UI.setPlayerSort('${key}')">${label}</button>`).join('')}
       </div>`}
@@ -526,7 +627,7 @@ const UI = {
             <tr>
               <th>名前</th>
               <th>学年</th>
-              ${leagueMode ? '' : '<th>ランク</th>'}
+              ${leagueMode ? '' : `<th>${strengthLabel}</th>`}
               <th>操作</th>
             </tr>
           </thead>
@@ -535,7 +636,11 @@ const UI = {
               <tr>
                 <td class="player-name-cell">${this.escapeHtml(p.name)}</td>
                 <td>${p.grade}年</td>
-                ${leagueMode ? '' : `<td><span class="rank-badge rank-${p.rank}">${p.rank}</span></td>`}
+                ${leagueMode ? '' : ratingMode
+                  ? `<td>${Matching.hasNoRating(p)
+                      ? '<span class="rating-missing">未入力</span>'
+                      : `<span class="rating-badge">${this.escapeHtml(this.formatRating(p.rating))}</span>`}</td>`
+                  : `<td><span class="rank-badge rank-${p.rank}">${p.rank}</span></td>`}
                 <td class="actions-cell">
                   <button class="btn-icon btn-edit" onclick="UI.editPlayer('${p.id}')" title="編集">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -564,7 +669,7 @@ const UI = {
           <span class="stat-label">学年分布:</span>
           ${Object.entries(gradeStats).sort((a,b) => a[0]-b[0]).map(([g, c]) => `<span class="stat-chip">${g}年: ${c}人</span>`).join('')}
         </div>
-        ${leagueMode ? '' : `
+        ${leagueMode ? '' : ratingMode ? this._ratingStatsHtml(players) : `
         <div class="stat-group">
           <span class="stat-label">ランク分布:</span>
           ${Object.entries(rankStats).filter(([,c]) => c > 0).map(([r, c]) => `<span class="stat-chip rank-${r}">${r}: ${c}人</span>`).join('')}
@@ -572,6 +677,24 @@ const UI = {
       </div>`;
 
     container.innerHTML += statsHtml;
+  },
+
+  _ratingStatsHtml(players) {
+    const rated   = players.filter(p => !Matching.hasNoRating(p)).map(p => Number(p.rating));
+    const missing = players.length - rated.length;
+    const chips = [];
+    if (rated.length > 0) {
+      const avg = rated.reduce((a, b) => a + b, 0) / rated.length;
+      chips.push(`<span class="stat-chip">平均 ${this.formatRating(avg)}</span>`);
+      chips.push(`<span class="stat-chip">最高 ${this.formatRating(Math.max(...rated))}</span>`);
+      chips.push(`<span class="stat-chip">最低 ${this.formatRating(Math.min(...rated))}</span>`);
+    }
+    if (missing > 0) chips.push(`<span class="stat-chip rating-missing-chip">未入力 ${missing}人</span>`);
+    return `
+        <div class="stat-group">
+          <span class="stat-label">レーティング:</span>
+          ${chips.join('')}
+        </div>`;
   },
 
   // ============================================
@@ -585,7 +708,7 @@ const UI = {
     });
 
     // セグメントコントロール（先後割り当て・対戦相手の学年/ランク帯の均等化）
-    ['sente-gote', 'grade-avoid', 'rank-balance'].forEach(id => {
+    ['sente-gote', 'grade-avoid', 'rank-balance', 'mean-balance'].forEach(id => {
       document.querySelectorAll(`#${id}-segment .wseg-btn`).forEach(btn => {
         btn.addEventListener('click', () => {
           document.querySelectorAll(`#${id}-segment .wseg-btn`)
@@ -637,6 +760,7 @@ const UI = {
       const assignSenteGote = parseInt(document.getElementById('sente-gote-weight').value) === 1;
       PDF.exportMatchTable(rounds, players, {
         ...this.displayOpts,
+        ratingMode: this.isRatingMode(),
         assignSenteGote,
       });
     });
@@ -647,6 +771,7 @@ const UI = {
     const numRounds        = parseInt(document.getElementById('num-rounds').value);
     const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
     const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
+    const meanBalanceLevel = parseInt(document.getElementById('mean-balance-weight').value);
     const matchingFormat   = document.getElementById('matching-format').value;
     const assignSenteGote  = parseInt(document.getElementById('sente-gote-weight').value) === 1;
 
@@ -661,7 +786,8 @@ const UI = {
 
     setTimeout(() => {
       const settings = AppStorage.getSettings();
-      const opts = { gradeAvoidLevel, rankBalanceLevel, assignSenteGote, numRounds };
+      const strengthMode = this.isRatingMode() ? 'rating' : 'rank';
+      const opts = { gradeAvoidLevel, rankBalanceLevel, meanBalanceLevel, strengthMode, assignSenteGote, numRounds };
 
       if (matchingFormat === 'swiss') {
         this._generateSwissRound(players, numRounds, opts);
@@ -669,7 +795,7 @@ const UI = {
         this._generateAllRoundsRandom(players, numRounds, opts);
       }
 
-      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel, matchingFormat, assignSenteGote });
+      AppStorage.updateSettings({ numRounds, gradeAvoidLevel, rankBalanceLevel, meanBalanceLevel, matchingFormat, assignSenteGote });
       this.renderMatchingResult();
     }, 100);
   },
@@ -879,7 +1005,10 @@ const UI = {
       return;
     }
 
-    let html = this.editMode ? '' : this.renderRankMatchupStats(rounds, playerMap);
+    const ratingMode = this.isRatingMode();
+    let html = this.editMode ? ''
+      : ratingMode ? this.renderOpponentStrengthStats(rounds, players)
+      : this.renderRankMatchupStats(rounds, playerMap);
     rounds.forEach((round, ri) => {
       html += `
         <div class="round-card">
@@ -896,20 +1025,20 @@ const UI = {
                 const sel = this.editSelected;
                 const isSel1 = sel && sel.ri === ri && sel.mi === i && sel.side === 'player1';
                 const isSel2 = sel && sel.ri === ri && sel.mi === i && sel.side === 'player2';
-                const playerBtn = (side, name, grade, rank) => `
+                const playerBtn = (side, id, name, grade, rank) => `
                   <button type="button"
                     class="edit-player-btn${(side === 'player1' ? isSel1 : isSel2) ? ' edit-selected' : ''}"
                     onclick="UI.selectPlayerForSwap(${ri}, ${i}, '${side}')">
                     <span class="edit-player-name">${this.escapeHtml(name)}</span>
                     ${showGrade ? `<span class="edit-player-meta">${grade}年</span>` : ''}
-                    ${showRank  ? `<span class="rank-badge rank-${rank}">${rank}</span>` : ''}
+                    ${showRank  ? this.strengthBadgeHtml(id, rank, playerMap, ratingMode) : ''}
                   </button>`;
                 return `
                   <div class="match-card editing-card">
                     <div class="match-number">${i + 1}</div>
-                    ${playerBtn('player1', match.player1Name, match.player1Grade, match.player1Rank)}
+                    ${playerBtn('player1', match.player1Id, match.player1Name, match.player1Grade, match.player1Rank)}
                     <button type="button" class="swap-btn" onclick="UI.swapSenteGote(${ri}, ${i})" title="先後交代">⇄</button>
-                    ${playerBtn('player2', match.player2Name, match.player2Grade, match.player2Rank)}
+                    ${playerBtn('player2', match.player2Id, match.player2Name, match.player2Grade, match.player2Rank)}
                   </div>`;
               }
 
@@ -926,7 +1055,7 @@ const UI = {
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player1Name)}</span>
                       ${showGrade ? `<span class="player-grade-text">${match.player1Grade}年</span>` : ''}
-                      ${showRank  ? `<span class="rank-badge rank-${match.player1Rank}">${match.player1Rank}</span>` : ''}
+                      ${showRank  ? this.strengthBadgeHtml(match.player1Id, match.player1Rank, playerMap, ratingMode) : ''}
                     </span>
                   </div>
                   <div class="match-vs">VS</div>
@@ -935,7 +1064,7 @@ const UI = {
                     <span class="player-info">
                       <span class="player-name-text">${this.escapeHtml(match.player2Name)}</span>
                       ${showGrade ? `<span class="player-grade-text">${match.player2Grade}年</span>` : ''}
-                      ${showRank  ? `<span class="rank-badge rank-${match.player2Rank}">${match.player2Rank}</span>` : ''}
+                      ${showRank  ? this.strengthBadgeHtml(match.player2Id, match.player2Rank, playerMap, ratingMode) : ''}
                     </span>
                   </div>
                 </div>`;
@@ -1040,6 +1169,71 @@ const UI = {
       </details>`;
   },
 
+  /**
+   * 対戦相手の強さ（レーティングモード）
+   * 選手ごとに、対戦相手の平均レーティングと目安（自分以外の全員の平均）との差を表示する。
+   */
+  renderOpponentStrengthStats(rounds, players) {
+    const rated = players.filter(p => !Matching.hasNoRating(p));
+    if (rated.length < 2) return '';
+    const rating = {};
+    rated.forEach(p => { rating[p.id] = Number(p.rating); });
+    const total = rated.reduce((a, p) => a + rating[p.id], 0);
+
+    const sum = {}, games = {};
+    rated.forEach(p => { sum[p.id] = 0; games[p.id] = 0; });
+    rounds.forEach(round => round.matches.forEach(m => {
+      if (!(m.player1Id in rating) || !(m.player2Id in rating)) return;
+      sum[m.player1Id] += rating[m.player2Id]; games[m.player1Id]++;
+      sum[m.player2Id] += rating[m.player1Id]; games[m.player2Id]++;
+    }));
+
+    const rows = rated
+      .map(p => {
+        const target = (total - rating[p.id]) / (rated.length - 1);
+        const avg    = games[p.id] > 0 ? sum[p.id] / games[p.id] : null;
+        return { p, games: games[p.id], avg, target, diff: avg == null ? null : avg - target };
+      })
+      .sort((a, b) => rating[b.p.id] - rating[a.p.id]);
+
+    const diffs = rows.filter(r => r.diff != null).map(r => r.diff);
+    const rms   = diffs.length > 0 ? Math.sqrt(diffs.reduce((a, d) => a + d * d, 0) / diffs.length) : 0;
+    const fmt   = n => this.formatRating(n);
+    const fmtDiff = d => `${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))}`;
+
+    return `
+      <details class="card rank-stats" ${this.rankStatsOpen ? 'open' : ''}
+        ontoggle="UI.rankStatsOpen = this.open">
+        <summary class="rank-stats-summary">
+          <span class="icon">📊</span> 対戦相手の強さ（平均レーティング）
+        </summary>
+        <div class="rank-stats-body">
+          <p class="rank-stats-caption">
+            目安との差の大きさ（全員の二乗平均）: <strong>${fmt(rms)}</strong>　小さいほど全員の対戦相手の強さがそろっています
+          </p>
+          <div class="opp-strength-table-wrapper">
+            <table class="opp-strength-table">
+              <thead>
+                <tr><th>選手</th><th>レート</th><th>対局</th><th>相手の平均</th><th>目安</th><th>差</th></tr>
+              </thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    <td class="opp-name">${this.escapeHtml(r.p.name)}</td>
+                    <td>${fmt(rating[r.p.id])}</td>
+                    <td>${r.games}</td>
+                    <td>${r.avg == null ? '—' : fmt(r.avg)}</td>
+                    <td class="opp-muted">${fmt(r.target)}</td>
+                    <td class="${r.diff == null ? '' : r.diff >= 0 ? 'opp-diff-up' : 'opp-diff-down'}">${r.diff == null ? '—' : fmtDiff(r.diff)}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <p class="rank-stats-note">目安は、相手を自分以外の全員から均等に選んだ場合の平均です。差が＋なら目安より強い相手、−なら弱い相手と多く当たっています。</p>
+        </div>
+      </details>`;
+  },
+
   setRankStatsView(rank) {
     this.rankStatsView = rank;
     this.renderMatchingResult();
@@ -1055,6 +1249,7 @@ const UI = {
     const container = document.getElementById('results-container');
     const playerMap = {};
     players.forEach(p => playerMap[p.id] = p);
+    const ratingMode = this.isRatingMode();
 
     // ヒント文を「先後あり/なし」で切り替え
     const showSenteGote = parseInt(document.getElementById('sente-gote-weight')?.value ?? '1') === 1;
@@ -1094,13 +1289,16 @@ const UI = {
           <div class="result-list">
             ${round.matches.map((match, mi) => {
               const { showGrade, showRank } = this.displayOpts;
+              const strengthText = (id, rank) => ratingMode
+                ? this.escapeHtml(this.formatRating(playerMap[id]?.rating))
+                : rank;
               const p1meta = [
                 showGrade ? `${match.player1Grade}年` : '',
-                showRank  ? match.player1Rank : ''
+                showRank  ? strengthText(match.player1Id, match.player1Rank) : ''
               ].filter(Boolean).join(' ');
               const p2meta = [
                 showGrade ? `${match.player2Grade}年` : '',
-                showRank  ? match.player2Rank : ''
+                showRank  ? strengthText(match.player2Id, match.player2Rank) : ''
               ].filter(Boolean).join(' ');
               const onclick1 = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, 'player1')"`;
               const onclickD = isConfirmed ? '' : `onclick="UI.setResult(${ri}, ${mi}, 'draw')"`;
@@ -1309,6 +1507,15 @@ const UI = {
     const standings = Matching.calculateStandings(players, rounds, true);
     const stat      = standings.find(s => s.id === playerId) || {};
     const history   = this._getPlayerHistory(playerId, rounds);
+    const ratingMode = this.isRatingMode();
+    const playerMap  = {};
+    players.forEach(p => { playerMap[p.id] = p; });
+
+    // レーティングモード：対戦相手の平均レーティング
+    const oppRatings = history
+      .filter(h => h.type === 'match' && !Matching.hasNoRating(playerMap[h.opponentId] || {}))
+      .map(h => Number(playerMap[h.opponentId].rating));
+    const oppAvg = oppRatings.length > 0 ? oppRatings.reduce((a, b) => a + b, 0) / oppRatings.length : null;
 
     // ランク別戦績
     const rankStats = { S: { w:0, l:0, d:0 }, A: { w:0, l:0, d:0 }, B: { w:0, l:0, d:0 }, C: { w:0, l:0, d:0 } };
@@ -1366,7 +1573,9 @@ const UI = {
               <td class="pd-round">第${h.roundNumber}回戦</td>
               <td class="pd-opponent">
                 <span class="pd-opp-name">${this.escapeHtml(h.opponentName)}</span>
-                <span class="pd-opp-meta">${h.opponentGrade}年 <span class="rank-badge rank-${h.opponentRank}" style="font-size:10px;padding:1px 5px;">${h.opponentRank}</span></span>
+                <span class="pd-opp-meta">${h.opponentGrade}年 ${ratingMode
+                  ? `<span class="rating-badge">${this.escapeHtml(this.formatRating(playerMap[h.opponentId]?.rating))}</span>`
+                  : `<span class="rank-badge rank-${h.opponentRank}" style="font-size:10px;padding:1px 5px;">${h.opponentRank}</span>`}</span>
               </td>
               ${showSenteGote ? `<td>${sideLabel}</td>` : ''}
               <td>${resultBadge(h.result)}</td>
@@ -1378,7 +1587,9 @@ const UI = {
 
     document.getElementById('player-detail-content').innerHTML = `
       <div class="pd-header">
-        <span class="rank-badge rank-${player.rank} pd-rank-badge">${player.rank}</span>
+        ${ratingMode
+          ? `<span class="rating-badge pd-rank-badge">${this.escapeHtml(this.formatRating(player.rating))}</span>`
+          : `<span class="rank-badge rank-${player.rank} pd-rank-badge">${player.rank}</span>`}
         <div class="pd-name-block">
           <span class="pd-name">${this.escapeHtml(player.name)}</span>
           <span class="pd-grade">${player.grade}年</span>
@@ -1395,7 +1606,11 @@ const UI = {
         <div class="pd-stat-box"><span class="pd-stat-val amber-color">${stat.points ?? 0}</span><span class="pd-stat-lbl">Pt</span></div>
       </div>
 
-      ${rankRowHtml ? `
+      ${ratingMode ? (oppAvg != null ? `
+      <div class="pd-section">
+        <h3 class="pd-section-title">対戦相手の平均レーティング</h3>
+        <p class="pd-opp-avg"><strong>${this.escapeHtml(this.formatRating(oppAvg))}</strong>（${oppRatings.length}局）</p>
+      </div>` : '') : rankRowHtml ? `
       <div class="pd-section">
         <h3 class="pd-section-title">ランク別戦績</h3>
         <div class="pd-rank-stats">${rankRowHtml}</div>
@@ -1534,6 +1749,7 @@ const UI = {
     this._setSegmentValue('sente-gote',   assignSenteGote ? 1 : 0);
     this._setSegmentValue('grade-avoid',  gradeLevel);
     this._setSegmentValue('rank-balance', rankLevel);
+    this._setSegmentValue('mean-balance', settings.meanBalanceLevel ?? 2);
     this.updateGenerateButton();
   },
 

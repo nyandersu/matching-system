@@ -2946,3 +2946,66 @@ body::before {
 @media print {
   .rank-stats { display: none; }
 }
+
+/* --- レーティングモード --- */
+.strength-mode-bar { flex-wrap: wrap; }
+
+.rating-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.rating-missing,
+.stat-chip.rating-missing-chip {
+  color: var(--accent-red);
+  font-size: 12px;
+  font-weight: 600;
+}
+.pd-opp-avg {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.pd-opp-avg strong {
+  font-size: 18px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 対戦相手の強さ（マッチングタブ） */
+.opp-strength-table-wrapper { overflow-x: auto; }
+.opp-strength-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.opp-strength-table th,
+.opp-strength-table td {
+  padding: 7px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.opp-strength-table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.opp-strength-table th:first-child,
+.opp-strength-table td.opp-name {
+  text-align: left;
+  color: var(--text-primary);
+}
+.opp-strength-table .opp-muted { color: var(--text-muted); }
+.opp-strength-table .opp-diff-up   { color: var(--accent-red); }
+.opp-strength-table .opp-diff-down { color: var(--accent-blue); }
