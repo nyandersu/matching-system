@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shogi-match-v13';
+const CACHE_NAME = 'shogi-match-v14';
 const ASSETS = [
   './',
   './index.html',

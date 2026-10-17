@@ -321,9 +321,9 @@ const UI = {
       userNameEl.textContent = session.username;
       userBar.classList.remove('hidden');
 
-      document.getElementById('logout-btn').addEventListener('click', () => {
+      document.getElementById('logout-btn').addEventListener('click', async () => {
         if (confirm('ログアウトしますか？')) {
-          AppStorage.clearSession();
+          await AppStorage.logout();
           window.location.href = window.location.pathname; // room param も消す
         }
       });
@@ -847,8 +847,9 @@ const UI = {
       return;
     }
 
+    // 既存の回戦（他の端末が入力した結果を含む）には触れず、新しい回戦だけ保存
+    AppStorage.appendRound(result.round);
     const updatedRounds = [...existingRounds, result.round];
-    AppStorage.saveRounds(updatedRounds);
 
     const next = updatedRounds.length + 1;
     if (updatedRounds.length >= numRounds) {
