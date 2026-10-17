@@ -196,6 +196,18 @@ const Matching = {
       }
 
       if (success) {
+        // 回戦をまたいだ偏りを入れ替えで解消（先後の割り当てより前に行う）
+        this._optimizeSchedule(allRounds, players, gradeWeight, rankWeight, ctx);
+        if (assignSenteGote) {
+          // 入れ替えで先後の初期割り当てが崩れるため、回数に応じて振り直してから最適化する
+          const sente = {};
+          players.forEach(p => { sente[p.id] = 0; });
+          allRounds.forEach(r => {
+            r.matches = this._assignSenteGote(r.matches, sente);
+            r.matches.forEach(m => { sente[m.player1Id]++; });
+          });
+        }
+
         // 全ラウンド生成後の最終パス：不戦勝のある選手の先後カウントを
         // 「先手 floor(playedGames/2) 回」に揃える。
         // 例：6回戦・1回不戦勝 → 5局のうち先手2回・後手3回。
@@ -576,12 +588,12 @@ const Matching = {
     let byePlayerId = null;
 
     if (active.length % 2 !== 0) {
-      // 最も得点が低くBYE回数が少ない選手にBYEを割り当て
-      const minBye = Math.min(...active.map(p => byeCounts[p.id] ?? 0));
-      const minPts = Math.min(...active.map(p => pointsMap[p.id] ?? 0));
-      const cands  = active.filter(p =>
-        (pointsMap[p.id] ?? 0) === minPts && (byeCounts[p.id] ?? 0) === minBye
-      );
+      // BYE回数が最も少ない選手のうち、最も得点が低い選手にBYEを割り当て
+      // （最下位の選手がすでにBYE済みでも候補が空にならないよう、BYE回数で先に絞る）
+      const minBye   = Math.min(...active.map(p => byeCounts[p.id] ?? 0));
+      const eligible = active.filter(p => (byeCounts[p.id] ?? 0) === minBye);
+      const minPts   = Math.min(...eligible.map(p => pointsMap[p.id] ?? 0));
+      const cands    = eligible.filter(p => (pointsMap[p.id] ?? 0) === minPts);
       const byeP   = cands[Math.floor(Math.random() * cands.length)];
       byePlayerId  = byeP.id;
       active       = active.filter(p => p.id !== byePlayerId);
@@ -720,6 +732,15 @@ const Matching = {
    * 各プレイヤーの対戦相手が多様な学年・ランクに分散するようにする。
    */
   pairScore(p1, p2, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
+    // ランダム性を追加して多様な組み合わせを生成
+    return this._pairPenalty(p1, p2, rankHistory, gradeHistory, gradeWeight, rankWeight, ctx) + Math.random() * 10;
+  },
+
+  /**
+   * 1組のペナルティ（低いほど良い・乱数なし）
+   * 学年・ランクの「対戦履歴の偏り」と、対戦相手の強さ（平均）のずれ。
+   */
+  _pairPenalty(p1, p2, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
     let score = 0;
 
     // 学年分散ペナルティ：相手の学年と同じ学年と過去対戦した回数に比例
@@ -737,9 +758,6 @@ const Matching = {
     // 対戦相手の強さ（平均）の均等化（レーティングモードのみ）
     score += this._meanCost(p1, p2, ctx);
 
-    // ランダム性を追加して多様な組み合わせを生成
-    score += Math.random() * 10;
-
     return score;
   },
 
@@ -747,19 +765,158 @@ const Matching = {
    * ペアリング全体の評価スコア
    */
   evaluatePairing(pairs, allPlayers, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
-    let totalScore = 0;
-    pairs.forEach(([p1, p2]) => {
-      const p1GHist = gradeHistory?.[p1.id];
-      const p2GHist = gradeHistory?.[p2.id];
-      if (p1GHist) totalScore += (p1GHist[p2.grade] ?? 0) * gradeWeight;
-      if (p2GHist) totalScore += (p2GHist[p1.grade] ?? 0) * gradeWeight;
-      const p1RHist = rankHistory?.[p1.id];
-      const p2RHist = rankHistory?.[p2.id];
-      if (p1RHist) totalScore += (p1RHist[this.bandOf(p2)] ?? 0) * rankWeight;
-      if (p2RHist) totalScore += (p2RHist[this.bandOf(p1)] ?? 0) * rankWeight;
-      totalScore += this._meanCost(p1, p2, ctx);
-    });
-    return totalScore;
+    return pairs.reduce((sum, [p1, p2]) =>
+      sum + this._pairPenalty(p1, p2, rankHistory, gradeHistory, gradeWeight, rankWeight, ctx), 0);
+  },
+
+  /**
+   * 全回戦を通した仕上げ（局所探索）。
+   *
+   * 1回戦ずつ組む貪欲法は「その回戦での増分」しか見ないため、全体では偏りが残る。
+   * 生成後に、ある回戦の2組 (a-b, c-d) を (a-c, b-d) / (a-d, b-c) に入れ替えたほうが
+   * 全体のペナルティが小さくなるなら採用し、改善がなくなるまで（または時間切れまで）繰り返す。
+   *
+   * 全体のペナルティ（貪欲法の増分を全回戦で足し合わせたものと同じ）：
+   *   学年・ランク帯 … 同じ学年・帯の相手と k 回当たった選手ごとに w × k(k−1)/2
+   *   強さの平均     … 選手ごとに (相手の強さの合計 − 対局数 × 目安)² / 分散 × w
+   * 入れ替えで変わるのは4人分だけなので、その4人の差分だけを計算する。
+   * 開始点（貪欲法の結果）と探索順がランダムなので、仕上げ後もランダム性は保たれる。
+   */
+  _optimizeSchedule(rounds, players, gradeWeight, rankWeight, ctx, timeBudgetMs = 400) {
+    const byId = {};
+    players.forEach(p => { byId[p.id] = p; });
+
+    // 選手ごとの状態（対戦相手の学年・帯の回数、強さの合計・対局数）
+    const state = {};
+    players.forEach(p => { state[p.id] = { grade: {}, band: {}, sum: 0, games: 0 }; });
+    const pairCount = new Map();
+    const add = (id, opp, sign) => {
+      const st = state[id];
+      st.grade[opp.grade] = (st.grade[opp.grade] ?? 0) + sign;
+      const band = this.bandOf(opp);
+      st.band[band] = (st.band[band] ?? 0) + sign;
+      if (ctx) { st.sum += sign * ctx.strength[opp.id]; st.games += sign; }
+    };
+    const link = (a, b, sign) => {
+      add(a.id, b, sign);
+      add(b.id, a, sign);
+      const key = this.makeMatchKey(a.id, b.id);
+      pairCount.set(key, (pairCount.get(key) ?? 0) + sign);
+    };
+
+    // 1人分のペナルティ（その選手が関わる分）
+    const tri = k => k * (k - 1) / 2;
+    const playerCost = (id) => {
+      const st = state[id];
+      let c = 0;
+      for (const g in st.grade) c += tri(st.grade[g]) * gradeWeight;
+      for (const b in st.band)  c += tri(st.band[b])  * rankWeight;
+      if (ctx && ctx.meanWeight) {
+        const dev = st.sum - st.games * ctx.target[id];
+        c += dev * dev / ctx.sigma2 * ctx.meanWeight;
+      }
+      return c;
+    };
+
+    const slots = [];   // [roundIndex, matchIndex]
+    rounds.forEach((r, ri) => r.matches.forEach((m, mi) => {
+      link(byId[m.player1Id], byId[m.player2Id], +1);
+      slots.push([ri, mi]);
+    }));
+
+    const deadline = Date.now() + timeBudgetMs;
+
+    // --- 焼きなまし：一時的に悪くなる入れ替えも確率的に受け入れ、局所解から抜け出す ---
+    const totalCost = () => players.reduce((sum, p) => sum + playerCost(p.id), 0);
+    const multi = rounds.filter(r => r.matches.length >= 2).map(r => r.matches);
+    if (multi.length > 0) {
+      let cur = totalCost();
+      let best = cur;
+      let bestSnap = rounds.map(r => r.matches.slice());
+      const iterations = 30000;
+      const t0 = Math.max(1, cur / Math.max(1, players.length) * 0.5);   // 初期温度：1人あたりのペナルティの半分程度
+      for (let it = 0; it < iterations && (it % 1000 !== 0 || Date.now() < deadline); it++) {
+        const temp = t0 * (1 - it / iterations) + 1e-6;
+        const matches = multi[Math.floor(Math.random() * multi.length)];
+        const i = Math.floor(Math.random() * matches.length);
+        let j = Math.floor(Math.random() * (matches.length - 1));
+        if (j >= i) j++;
+        const a = byId[matches[i].player1Id], b = byId[matches[i].player2Id];
+        const c = byId[matches[j].player1Id], d = byId[matches[j].player2Id];
+        const [x1, y1, x2, y2] = Math.random() < 0.5 ? [a, c, b, d] : [a, d, b, c];
+        if (pairCount.get(this.makeMatchKey(x1.id, y1.id)) || pairCount.get(this.makeMatchKey(x2.id, y2.id))) continue;
+
+        const ids = [a.id, b.id, c.id, d.id];
+        const before = ids.reduce((sum, id) => sum + playerCost(id), 0);
+        link(a, b, -1); link(c, d, -1);
+        link(x1, y1, +1); link(x2, y2, +1);
+        const delta = ids.reduce((sum, id) => sum + playerCost(id), 0) - before;
+
+        if (delta <= 0 || Math.random() < Math.exp(-delta / temp)) {
+          matches[i] = this._makeMatch(x1, y1);
+          matches[j] = this._makeMatch(x2, y2);
+          cur += delta;
+          if (cur < best - 1e-9) { best = cur; bestSnap = rounds.map(r => r.matches.slice()); }
+        } else {
+          link(x1, y1, -1); link(x2, y2, -1);
+          link(a, b, +1); link(c, d, +1);
+        }
+      }
+      // 最良だった状態に戻し、状態を作り直す
+      rounds.forEach((r, ri) => { r.matches = bestSnap[ri]; });
+      players.forEach(p => { state[p.id] = { grade: {}, band: {}, sum: 0, games: 0 }; });
+      pairCount.clear();
+      rounds.forEach(r => r.matches.forEach(m => link(byId[m.player1Id], byId[m.player2Id], +1)));
+    }
+
+    // --- 仕上げ：改善する入れ替えがなくなるまで ---
+    for (let pass = 0; pass < 50 && Date.now() < deadline; pass++) {
+      const order = this.shuffle(rounds.map((_, i) => i));
+      let improved = false;
+      for (const ri of order) {
+        const matches = rounds[ri].matches;
+        for (let i = 0; i < matches.length; i++) {
+          for (let j = i + 1; j < matches.length; j++) {
+            const a = byId[matches[i].player1Id], b = byId[matches[i].player2Id];
+            const c = byId[matches[j].player1Id], d = byId[matches[j].player2Id];
+            const ids = [a.id, b.id, c.id, d.id];
+            const before = ids.reduce((sum, id) => sum + playerCost(id), 0);
+
+            let best = null;
+            let bestDelta = -1e-9;
+            for (const [x1, y1, x2, y2] of this.shuffle([[a, c, b, d], [a, d, b, c]])) {
+              if (pairCount.get(this.makeMatchKey(x1.id, y1.id)) || pairCount.get(this.makeMatchKey(x2.id, y2.id))) continue;
+              link(a, b, -1); link(c, d, -1);
+              link(x1, y1, +1); link(x2, y2, +1);
+              const delta = ids.reduce((sum, id) => sum + playerCost(id), 0) - before;
+              link(x1, y1, -1); link(x2, y2, -1);
+              link(a, b, +1); link(c, d, +1);
+              if (delta < bestDelta) { bestDelta = delta; best = [x1, y1, x2, y2]; }
+            }
+
+            if (best) {
+              const [x1, y1, x2, y2] = best;
+              link(a, b, -1); link(c, d, -1);
+              link(x1, y1, +1); link(x2, y2, +1);
+              matches[i] = this._makeMatch(x1, y1);
+              matches[j] = this._makeMatch(x2, y2);
+              improved = true;
+            }
+          }
+        }
+      }
+      if (!improved) break;
+    }
+  },
+
+  _makeMatch(p1, p2) {
+    return {
+      player1Id: p1.id,       player2Id: p2.id,
+      player1Name: p1.name,   player2Name: p2.name,
+      player1Rank: p1.rank,   player2Rank: p2.rank,
+      player1Grade: p1.grade, player2Grade: p2.grade,
+      result: null,
+    };
   },
 
   /**
