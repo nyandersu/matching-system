@@ -1,0 +1,4 @@
+# アプリの配信に不要なもの
+tests/
+supabase/
+.github/
