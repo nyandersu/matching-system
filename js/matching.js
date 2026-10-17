@@ -10,6 +10,99 @@ const Matching = {
   // それぞれ「対戦相手の(学年|ランク)分布の偏り」へのペナルティ係数
   GRADE_WEIGHTS:   [0,  5,  15,  40,  100],
   RANK_WEIGHTS:    [0,  5,  15,  40,  100],
+  // 対戦相手の強さ（平均）の偏りへのペナルティ係数（レーティングモードのみ）
+  MEAN_WEIGHTS:    [0,  5,  15,  40,  100],
+
+  // ランクモードでの強さの数値
+  RANK_STRENGTH: { S: 4, A: 3, B: 2, C: 1 },
+
+  /** レーティングが未入力（数値でない）か */
+  hasNoRating(p) {
+    return p.rating == null || p.rating === '' || !Number.isFinite(Number(p.rating));
+  },
+
+  /** 選手の強さの数値（レーティングモードは入力値、ランクモードは S=4〜C=1） */
+  strengthOf(p, mode) {
+    if (mode === 'rating') return Number(p.rating);
+    return this.RANK_STRENGTH[p.rank] ?? 0;
+  },
+
+  /** ランク帯の均等化に使う帯（レーティングモードではレーティング順の4分位） */
+  bandOf(p) {
+    return p._band ?? p.rank;
+  },
+
+  /**
+   * 強さの準備。
+   * - レーティングモード：レーティング順に4分位の帯（S〜C相当）を割り当て、
+   *   「対戦相手の強さ（平均）の均等化」用の目標値を計算する
+   *   目標値 = 自分以外の全員の平均（相手を均等に選んだ場合の期待値）
+   * - ランクモード：従来どおり（平均の均等化は行わない）
+   * @returns {{ players: Array, ctx: Object|null, error?: string }}
+   */
+  prepareStrength(players, options = {}) {
+    if (options.strengthMode !== 'rating') return { players, ctx: null };
+
+    const missing = players.filter(p => this.hasNoRating(p));
+    if (missing.length > 0) {
+      const names = missing.slice(0, 5).map(p => p.name).join('、');
+      return { error: `レーティングが未入力の選手がいます: ${names}${missing.length > 5 ? ` ほか${missing.length - 5}人` : ''}` };
+    }
+
+    const strength = {};
+    players.forEach(p => { strength[p.id] = this.strengthOf(p, 'rating'); });
+
+    // 同じレーティングは同じ帯になるよう、最初に出現した順位で帯を決める
+    const values = players.map(p => strength[p.id]).sort((a, b) => b - a);
+    const bandFor = v => this.RANKS[Math.min(3, Math.floor(values.indexOf(v) * 4 / values.length))];
+    const working = players.map(p => ({ ...p, _band: bandFor(strength[p.id]) }));
+
+    const n     = players.length;
+    const total = values.reduce((a, b) => a + b, 0);
+    const mean  = total / n;
+    const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / n;
+    const target = {};
+    players.forEach(p => { target[p.id] = n > 1 ? (total - strength[p.id]) / (n - 1) : mean; });
+
+    const meanLevel = options.meanBalanceLevel ?? 2;
+    return {
+      players: working,
+      ctx: {
+        meanWeight: this.MEAN_WEIGHTS[meanLevel] ?? 15,
+        strength, target,
+        sigma2: variance > 0 ? variance : 1,
+        oppSum: {}, games: {},
+      },
+    };
+  },
+
+  _resetMeanHistory(ctx, players) {
+    if (!ctx) return;
+    players.forEach(p => { ctx.oppSum[p.id] = 0; ctx.games[p.id] = 0; });
+  },
+
+  _recordMeanHistory(ctx, id1, id2) {
+    if (!ctx || !(id1 in ctx.strength) || !(id2 in ctx.strength)) return;
+    ctx.oppSum[id1] += ctx.strength[id2]; ctx.games[id1]++;
+    ctx.oppSum[id2] += ctx.strength[id1]; ctx.games[id2]++;
+  },
+
+  /**
+   * 対戦相手の強さ（平均）の偏りの増分。
+   * 各選手の「相手の強さの合計 − 対局数 × 目標値」の二乗が、この対局でどれだけ増えるか。
+   * 標準偏差1つ分のずれ ≒ ランク帯の重複1回分 になるよう分散で正規化する。
+   */
+  _meanCost(p1, p2, ctx) {
+    if (!ctx || !ctx.meanWeight) return 0;
+    const delta = (id, oppStrength) => {
+      const before = ctx.oppSum[id] - ctx.games[id] * ctx.target[id];
+      const after  = before + oppStrength - ctx.target[id];
+      return after * after - before * before;
+    };
+    return (delta(p1.id, ctx.strength[p2.id]) + delta(p2.id, ctx.strength[p1.id]))
+      / ctx.sigma2 * ctx.meanWeight;
+  },
+
 
   /**
    * 全ラウンドの対戦組み合わせを生成
@@ -17,7 +110,11 @@ const Matching = {
    * @param {number} numRounds - ラウンド数
    * @returns {Array|null} ラウンド配列 or null（生成不可）
    */
-  generateAllRounds(players, numRounds, options = {}) {
+  generateAllRounds(inputPlayers, numRounds, options = {}) {
+    const prep = this.prepareStrength(inputPlayers, options);
+    if (prep.error) return { error: prep.error };
+    const players   = prep.players;
+    const ctx       = prep.ctx;
     const gradeLevel      = options.gradeBalanceLevel ?? options.gradeAvoidLevel ?? 2;
     const rankLevel       = options.rankBalanceLevel ?? 2;
     const gradeWeight     = this.GRADE_WEIGHTS[gradeLevel] ?? 15;
@@ -57,13 +154,14 @@ const Matching = {
         byeCounts[p.id]    = 0;
         senteHistory[p.id] = 0;
       });
+      this._resetMeanHistory(ctx, players);
       allRounds.length = 0;
 
       let success = true;
 
       for (let round = 0; round < numRounds; round++) {
         const result = this.generateSingleRound(
-          players, matchHistory, rankHistory, gradeHistory, byeCounts, round, gradeWeight, rankWeight
+          players, matchHistory, rankHistory, gradeHistory, byeCounts, round, gradeWeight, rankWeight, ctx
         );
 
         if (!result) { success = false; break; }
@@ -85,10 +183,11 @@ const Matching = {
           const p1 = players.find(p => p.id === match.player1Id);
           const p2 = players.find(p => p.id === match.player2Id);
           if (p1 && p2) {
-            rankHistory[p1.id][p2.rank]++;
-            rankHistory[p2.id][p1.rank]++;
+            rankHistory[p1.id][this.bandOf(p2)]++;
+            rankHistory[p2.id][this.bandOf(p1)]++;
             gradeHistory[p1.id][p2.grade] = (gradeHistory[p1.id][p2.grade] ?? 0) + 1;
             gradeHistory[p2.id][p1.grade] = (gradeHistory[p2.id][p1.grade] ?? 0) + 1;
+            this._recordMeanHistory(ctx, p1.id, p2.id);
           }
           if (assignSenteGote) senteHistory[match.player1Id]++;
         });
@@ -114,7 +213,7 @@ const Matching = {
   /**
    * 既存ラウンドから対戦・ランク履歴を再構築
    */
-  buildHistoryFromRounds(players, rounds) {
+  buildHistoryFromRounds(players, rounds, ctx = null) {
     const matchHistory = new Set();
     const rankHistory  = {};
     const gradeHistory = {};
@@ -126,16 +225,18 @@ const Matching = {
       byeCounts[p.id]    = 0;
       senteHistory[p.id] = 0;
     });
+    this._resetMeanHistory(ctx, players);
     rounds.forEach(round => {
       round.matches.forEach(match => {
         matchHistory.add(this.makeMatchKey(match.player1Id, match.player2Id));
         const p1 = players.find(p => p.id === match.player1Id);
         const p2 = players.find(p => p.id === match.player2Id);
         if (p1 && p2) {
-          rankHistory[p1.id][p2.rank]++;
-          rankHistory[p2.id][p1.rank]++;
+          rankHistory[p1.id][this.bandOf(p2)]++;
+          rankHistory[p2.id][this.bandOf(p1)]++;
           gradeHistory[p1.id][p2.grade] = (gradeHistory[p1.id][p2.grade] ?? 0) + 1;
           gradeHistory[p2.id][p1.grade] = (gradeHistory[p2.id][p1.grade] ?? 0) + 1;
+          this._recordMeanHistory(ctx, p1.id, p2.id);
         }
         // player1 = 先手としてカウント
         if (senteHistory[match.player1Id] !== undefined) senteHistory[match.player1Id]++;
@@ -148,17 +249,21 @@ const Matching = {
   /**
    * スイスドロー方式：現在の成績に基づいて次の1ラウンドを生成
    */
-  generateNextSwissRound(players, existingRounds, options = {}) {
-    if (players.length < 2) {
+  generateNextSwissRound(inputPlayers, existingRounds, options = {}) {
+    if (inputPlayers.length < 2) {
       return { error: 'プレイヤーが2人以上必要です。' };
     }
+    const prep = this.prepareStrength(inputPlayers, options);
+    if (prep.error) return { error: prep.error };
+    const players   = prep.players;
+    const ctx       = prep.ctx;
 
     const gradeLevel   = options.gradeBalanceLevel ?? options.gradeAvoidLevel ?? 2;
     const rankLevel    = options.rankBalanceLevel ?? 2;
     const gradeWeight     = this.GRADE_WEIGHTS[gradeLevel] ?? 15;
     const rankWeight      = this.RANK_WEIGHTS[rankLevel]   ?? 15;
     const assignSenteGote = options.assignSenteGote ?? true;
-    const { matchHistory, rankHistory, gradeHistory, byeCounts, senteHistory } = this.buildHistoryFromRounds(players, existingRounds);
+    const { matchHistory, rankHistory, gradeHistory, byeCounts, senteHistory } = this.buildHistoryFromRounds(players, existingRounds, ctx);
     const roundIndex = existingRounds.length;
 
     // 現在の得点マップを構築（空き手合いは常に不戦勝扱い）
@@ -176,10 +281,10 @@ const Matching = {
 
     for (let trial = 0; trial < 80; trial++) {
       const res = this._trySwissPairing(
-        players, matchHistory, rankHistory, gradeHistory, byeCounts, pointsMap, gradeWeight, rankWeight
+        players, matchHistory, rankHistory, gradeHistory, byeCounts, pointsMap, gradeWeight, rankWeight, ctx
       );
       if (!res) continue;
-      const score = this.evaluatePairing(res.pairs, players, rankHistory, gradeHistory, gradeWeight, rankWeight);
+      const score = this.evaluatePairing(res.pairs, players, rankHistory, gradeHistory, gradeWeight, rankWeight, ctx);
       if (score < bestScore) {
         bestScore  = score;
         bestPairs  = res.pairs;
@@ -460,7 +565,7 @@ const Matching = {
     });
   },
 
-  _trySwissPairing(players, matchHistory, rankHistory, gradeHistory, byeCounts, pointsMap, gradeWeight, rankWeight) {
+  _trySwissPairing(players, matchHistory, rankHistory, gradeHistory, byeCounts, pointsMap, gradeWeight, rankWeight, ctx = null) {
     // 得点降順にソート（同点はランダムでシャッフル）
     const sorted = [...players].sort((a, b) => {
       const diff = (pointsMap[b.id] ?? 0) - (pointsMap[a.id] ?? 0);
@@ -501,10 +606,11 @@ const Matching = {
         const ptsDiff    = Math.abs((pointsMap[active[i].id] ?? 0) - (pointsMap[active[j].id] ?? 0)) * 20;
         const gradeP     = ((gradeHistory[active[i].id]?.[active[j].grade] ?? 0) +
                             (gradeHistory[active[j].id]?.[active[i].grade] ?? 0)) * gradeWeight;
-        const rankP      = ((rankHistory[active[i].id]?.[active[j].rank] ?? 0) +
-                            (rankHistory[active[j].id]?.[active[i].rank] ?? 0)) * rankWeight;
+        const rankP      = ((rankHistory[active[i].id]?.[this.bandOf(active[j])] ?? 0) +
+                            (rankHistory[active[j].id]?.[this.bandOf(active[i])] ?? 0)) * rankWeight;
+        const meanP      = this._meanCost(active[i], active[j], ctx);
 
-        const score = standingGap + ptsDiff + gradeP + rankP + Math.random() * 5;
+        const score = standingGap + ptsDiff + gradeP + rankP + meanP + Math.random() * 5;
         if (score < bestScore) { bestScore = score; bestJ = j; }
       }
 
@@ -520,7 +626,7 @@ const Matching = {
   /**
    * 単一ラウンドの対戦組み合わせを生成
    */
-  generateSingleRound(players, matchHistory, rankHistory, gradeHistory, byeCounts, roundIndex, gradeWeight = 15, rankWeight = 15) {
+  generateSingleRound(players, matchHistory, rankHistory, gradeHistory, byeCounts, roundIndex, gradeWeight = 15, rankWeight = 15, ctx = null) {
     const isOdd = players.length % 2 !== 0;
     let byePlayerId = null;
     let activePlayers = [...players];
@@ -541,10 +647,10 @@ const Matching = {
 
     for (let trial = 0; trial < maxTrials; trial++) {
       const shuffled = this.shuffle([...activePlayers]);
-      const pairs = this.greedyPairing(shuffled, matchHistory, rankHistory, gradeHistory, gradeWeight, rankWeight);
+      const pairs = this.greedyPairing(shuffled, matchHistory, rankHistory, gradeHistory, gradeWeight, rankWeight, ctx);
 
       if (pairs) {
-        const score = this.evaluatePairing(pairs, players, rankHistory, gradeHistory, gradeWeight, rankWeight);
+        const score = this.evaluatePairing(pairs, players, rankHistory, gradeHistory, gradeWeight, rankWeight, ctx);
         if (score < bestScore) {
           bestScore = score;
           bestPairs = pairs;
@@ -574,7 +680,7 @@ const Matching = {
   /**
    * 貪欲法によるペアリング
    */
-  greedyPairing(players, matchHistory, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15) {
+  greedyPairing(players, matchHistory, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
     const n = players.length;
     const used = new Set();
     const pairs = [];
@@ -591,7 +697,7 @@ const Matching = {
         // 再戦は絶対禁止 — スキップして別シャッフルに委ねる
         if (matchHistory.has(this.makeMatchKey(players[i].id, players[j].id))) continue;
 
-        const score = this.pairScore(players[i], players[j], rankHistory, gradeHistory, gradeWeight, rankWeight);
+        const score = this.pairScore(players[i], players[j], rankHistory, gradeHistory, gradeWeight, rankWeight, ctx);
         if (score < bestScore) {
           bestScore = score;
           bestPartner = j;
@@ -613,7 +719,7 @@ const Matching = {
    * 学年・ランクの「対戦履歴の偏り」をペナルティ化することで、
    * 各プレイヤーの対戦相手が多様な学年・ランクに分散するようにする。
    */
-  pairScore(p1, p2, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15) {
+  pairScore(p1, p2, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
     let score = 0;
 
     // 学年分散ペナルティ：相手の学年と同じ学年と過去対戦した回数に比例
@@ -625,8 +731,11 @@ const Matching = {
     // ランク分散ペナルティ
     const p1RankHist = rankHistory?.[p1.id];
     const p2RankHist = rankHistory?.[p2.id];
-    if (p1RankHist) score += (p1RankHist[p2.rank] ?? 0) * rankWeight;
-    if (p2RankHist) score += (p2RankHist[p1.rank] ?? 0) * rankWeight;
+    if (p1RankHist) score += (p1RankHist[this.bandOf(p2)] ?? 0) * rankWeight;
+    if (p2RankHist) score += (p2RankHist[this.bandOf(p1)] ?? 0) * rankWeight;
+
+    // 対戦相手の強さ（平均）の均等化（レーティングモードのみ）
+    score += this._meanCost(p1, p2, ctx);
 
     // ランダム性を追加して多様な組み合わせを生成
     score += Math.random() * 10;
@@ -637,7 +746,7 @@ const Matching = {
   /**
    * ペアリング全体の評価スコア
    */
-  evaluatePairing(pairs, allPlayers, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15) {
+  evaluatePairing(pairs, allPlayers, rankHistory, gradeHistory, gradeWeight = 15, rankWeight = 15, ctx = null) {
     let totalScore = 0;
     pairs.forEach(([p1, p2]) => {
       const p1GHist = gradeHistory?.[p1.id];
@@ -646,8 +755,9 @@ const Matching = {
       if (p2GHist) totalScore += (p2GHist[p1.grade] ?? 0) * gradeWeight;
       const p1RHist = rankHistory?.[p1.id];
       const p2RHist = rankHistory?.[p2.id];
-      if (p1RHist) totalScore += (p1RHist[p2.rank] ?? 0) * rankWeight;
-      if (p2RHist) totalScore += (p2RHist[p1.rank] ?? 0) * rankWeight;
+      if (p1RHist) totalScore += (p1RHist[this.bandOf(p2)] ?? 0) * rankWeight;
+      if (p2RHist) totalScore += (p2RHist[this.bandOf(p1)] ?? 0) * rankWeight;
+      totalScore += this._meanCost(p1, p2, ctx);
     });
     return totalScore;
   },

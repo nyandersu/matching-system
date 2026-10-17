@@ -323,14 +323,20 @@ const PDF = {
    * 対戦表HTML生成
    */
   buildMatchTableHTML(rounds, players, opts = { showGrade: true, showRank: true, assignSenteGote: true }) {
-    const { showGrade, showRank, assignSenteGote } = opts;
+    const { showGrade, showRank, assignSenteGote, ratingMode } = opts;
     const playerMap = {};
     players.forEach(p => { playerMap[p.id] = p; });
 
-    const playerLabel = (name, grade, rank) => {
+    const playerLabel = (name, grade, rank, id) => {
       let s = this._esc(name);
       if (showGrade && grade != null) s += ` <span style="color:#666;font-size:11px;">${this._esc(grade)}年</span>`;
-      if (showRank  && rank  != null) {
+      if (showRank && ratingMode) {
+        // レーティングモード：選手の現在のレーティング
+        const rating = playerMap[id]?.rating;
+        if (!Matching.hasNoRating({ rating })) {
+          s += ` <span style="color:#333;font-size:11px;font-weight:bold;">${this._esc(Math.round(Number(rating) * 10) / 10)}</span>`;
+        }
+      } else if (showRank && rank != null) {
         // rank は S/A/B/C のみ許可
         const safeRank = /^[SABC]$/.test(rank) ? rank : '';
         if (safeRank) s += ` <span class="rank-${safeRank}">${safeRank}</span>`;
@@ -369,9 +375,9 @@ const PDF = {
         html += `
             <tr>
               <td>${i + 1}</td>
-              <td class="name-td">${playerLabel(match.player1Name, match.player1Grade, match.player1Rank)}</td>
+              <td class="name-td">${playerLabel(match.player1Name, match.player1Grade, match.player1Rank, match.player1Id)}</td>
               <td><strong>${resultStr}</strong></td>
-              <td class="name-td">${playerLabel(match.player2Name, match.player2Grade, match.player2Rank)}</td>
+              <td class="name-td">${playerLabel(match.player2Name, match.player2Grade, match.player2Rank, match.player2Id)}</td>
             </tr>`;
       });
 

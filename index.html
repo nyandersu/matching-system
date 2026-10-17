@@ -196,6 +196,11 @@
   <!-- Tab: 選手管理             -->
   <!-- ======================== -->
   <div class="tab-panel active" id="tab-players" role="tabpanel">
+    <div class="display-opts-bar strength-mode-bar" id="strength-mode-bar">
+      <span class="display-opts-label">強さの入力</span>
+      <button type="button" class="sort-chip" data-mode="rank">ランク（S〜Cの4段階）</button>
+      <button type="button" class="sort-chip" data-mode="rating">レーティング（数値）</button>
+    </div>
     <div class="card">
       <h2 class="card-title" id="form-title">
         <span class="icon">✦</span> 選手を追加
@@ -227,6 +232,11 @@
               <option value="B">B ランク</option>
               <option value="C">C ランク</option>
             </select>
+          </div>
+          <div class="form-group hidden" id="player-rating-group">
+            <label class="form-label" for="player-rating">レーティング</label>
+            <input type="number" id="player-rating" class="form-input" placeholder="例: 1500"
+              step="any" min="-99999" max="99999" inputmode="decimal">
           </div>
         </div>
         <div class="btn-group">
@@ -295,7 +305,7 @@
           <input type="hidden" id="grade-avoid-weight" value="2">
         </div>
         <div class="form-group weight-group">
-          <label class="form-label">対戦相手のランク帯の均等化</label>
+          <label class="form-label" id="rank-balance-label">対戦相手のランク帯の均等化</label>
           <div class="weight-segment" id="rank-balance-segment">
             <button type="button" class="wseg-btn" data-value="0">無効</button>
             <button type="button" class="wseg-btn" data-value="1">低</button>
@@ -304,6 +314,17 @@
             <button type="button" class="wseg-btn" data-value="4">最高</button>
           </div>
           <input type="hidden" id="rank-balance-weight" value="2">
+        </div>
+        <div class="form-group weight-group hidden" id="mean-balance-group">
+          <label class="form-label">対戦相手の強さ（平均）の均等化</label>
+          <div class="weight-segment" id="mean-balance-segment">
+            <button type="button" class="wseg-btn" data-value="0">無効</button>
+            <button type="button" class="wseg-btn" data-value="1">低</button>
+            <button type="button" class="wseg-btn wseg-active" data-value="2">標準</button>
+            <button type="button" class="wseg-btn" data-value="3">高</button>
+            <button type="button" class="wseg-btn" data-value="4">最高</button>
+          </div>
+          <input type="hidden" id="mean-balance-weight" value="2">
         </div>
         <button class="btn btn-primary" id="generate-btn">
           ⚡ 対戦表を生成

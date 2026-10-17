@@ -349,7 +349,8 @@ const AppStorage = {
       this._isSyncing = true;
 
       const [sQuery, pQuery, rQuery, lQuery] = await Promise.all([
-        supabaseClient.from('settings').select('*').eq('id', 'global').maybeSingle(),
+        // 設定は部屋ごと（id = 部屋コード）
+        supabaseClient.from('settings').select('*').eq('id', this.roomId).maybeSingle(),
         supabaseClient.from('players').select('*').eq('room_id', this.roomId),
         supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number'),
         supabaseClient.from('leagues').select('data').eq('room_id', this.roomId).maybeSingle()
@@ -365,7 +366,8 @@ const AppStorage = {
       const data = this.loadAll();
 
       if (sQuery.data) {
-        data.settings.numRounds = sQuery.data.num_rounds;
+        data.settings.numRounds    = sQuery.data.num_rounds;
+        data.settings.strengthMode = sQuery.data.strength_mode === 'rating' ? 'rating' : 'rank';
       }
 
       // Supabase が実際にデータを持っている場合のみ上書き
@@ -373,7 +375,8 @@ const AppStorage = {
       // → Supabase にデータがない（同期失敗・オフライン生成）場合はローカルを保持する
       if (pQuery.data && pQuery.data.length > 0) {
         data.players = pQuery.data.map(p => ({
-          id: p.id, name: p.name, grade: p.grade, rank: p.rank
+          id: p.id, name: p.name, grade: p.grade, rank: p.rank,
+          rating: p.rating == null ? null : Number(p.rating)
         }));
       }
 
@@ -410,15 +413,17 @@ const AppStorage = {
 
     try {
       await supabaseClient.from('settings').upsert({
-        id: 'global',
+        id: this.roomId,
         num_rounds:        data.settings.numRounds,
-        bye_counts_as_win: true   // 常に不戦勝扱い
+        bye_counts_as_win: true,   // 常に不戦勝扱い
+        strength_mode:     data.settings.strengthMode === 'rating' ? 'rating' : 'rank'
       });
 
       if (data.players.length > 0) {
         await supabaseClient.from('players').upsert(
           data.players.map(p => ({
             id: p.id, name: p.name, grade: p.grade, rank: p.rank,
+            rating: p.rating ?? null,
             room_id: this.roomId
           }))
         );
@@ -484,7 +489,9 @@ const AppStorage = {
       settings: {
         numRounds: 5,
         gradeAvoidLevel: 2, rankBalanceLevel: 2, matchingFormat: 'random',
-        assignSenteGote: true
+        assignSenteGote: true,
+        strengthMode: 'rank',      // 'rank'（S〜Cの4段階）| 'rating'（数値を手入力）
+        meanBalanceLevel: 2        // 対戦相手の強さ（平均）の均等化（レーティングモードのみ）
       },
       league: this.getDefaultLeague()
     };
