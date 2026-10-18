@@ -132,6 +132,7 @@ const League = {
     return `
       <div class="league-header">
         <div class="league-term-badge">第 ${league.currentTerm} 期</div>
+        <button class="btn btn-secondary btn-sm" onclick="League.showPdfDialog()">📄 PDF出力</button>
         <button class="btn btn-ghost btn-sm" onclick="League.disable()">
           リーグ戦モードを終了
         </button>
@@ -1226,6 +1227,131 @@ const League = {
       `第${term.term}期を確定しました（昇降級${changes.length}件）。第${league.currentTerm}期を開始します。`,
       'success'
     );
+  },
+
+  // ============================================
+  // PDF 出力（順位表・対戦表・個人成績書）
+  // ============================================
+
+  showPdfDialog() {
+    const modal = document.getElementById('league-pdf-modal');
+    const kindEl = document.getElementById('league-pdf-kind');
+    const close = () => modal.classList.add('hidden');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      document.getElementById('league-pdf-close').addEventListener('click', close);
+      document.getElementById('league-pdf-cancel').addEventListener('click', close);
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      kindEl.addEventListener('change', () => this._refreshPdfDialog(true));
+      document.getElementById('league-pdf-apply').addEventListener('click', async () => {
+        const btn = document.getElementById('league-pdf-apply');
+        btn.disabled = true;
+        btn.textContent = '作成中...';
+        try {
+          await this._exportPdf();
+          close();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'PDF を作成';
+        }
+      });
+    }
+    this._refreshPdfDialog(true);
+    modal.classList.remove('hidden');
+  },
+
+  _refreshPdfDialog(resetOrientation) {
+    const league = this._normalize(AppStorage.getLeague());
+    const kind = document.getElementById('league-pdf-kind').value;
+    const target = document.getElementById('league-pdf-target');
+    const pmap = this._playerMap();
+    if (kind === 'report') {
+      const ids = this._tiers(league).flatMap(t => t.classes.flatMap(c => (league.members || [])
+        .filter(m => m.classId === c.id).map(m => m.playerId)));
+      target.innerHTML = '<option value="">全員（1人1ページ）</option>'
+        + ids.map(id => `<option value="${this._esc(id)}">${this._esc(pmap[id]?.name || '?')}</option>`).join('');
+    } else {
+      target.innerHTML = '<option value="">全階級</option>'
+        + (league.classes || []).map(c => `<option value="${this._esc(c.id)}">${this._esc(c.name)}</option>`).join('');
+    }
+    if (resetOrientation) document.getElementById('league-pdf-orientation').value = kind === 'cross' ? 'landscape' : 'portrait';
+    document.getElementById('league-pdf-perpage-wrap').classList.toggle('hidden', kind !== 'standings');
+    document.getElementById('league-pdf-note').textContent = {
+      standings: '昇級・降級の印は、順位表タブの昇降級の設定に基づく予定です。境目が同点でプレーオフの結果を選んでいない選手は「同点」と表示します。',
+      cross: '1階級1ページ。未入力の対局は空欄なので、印刷して手書きで記入することもできます。人数が多い階級は A4 横がおすすめです。',
+      report: '選手ごとに、この期のリーグ戦の結果と、この部屋の内戦の結果をまとめます。部の名簿にひも付いた選手は通算成績も載せます。',
+    }[kind];
+  },
+
+  async _exportPdf() {
+    const league = this._normalize(AppStorage.getLeague());
+    const kind = document.getElementById('league-pdf-kind').value;
+    const target = document.getElementById('league-pdf-target').value;
+    const orientation = document.getElementById('league-pdf-orientation').value;
+    const termLabel = `第${league.currentTerm}期`;
+    const classes = this._tiers(league).flatMap(t => t.classes).filter(c => !target || c.id === target);
+
+    if (kind === 'report') {
+      const ids = target ? [target] : this._tiers(league).flatMap(t => t.classes.flatMap(c =>
+        (league.members || []).filter(m => m.classId === c.id).map(m => m.playerId)));
+      if (ids.length === 0) { UI.showToast('階級に所属している選手がいません', 'error'); return; }
+      await UI.exportPlayerReports(ids, { orientation });
+      return;
+    }
+    if (classes.length === 0) { UI.showToast('階級がありません', 'error'); return; }
+
+    if (kind === 'standings') {
+      await PDF.exportLeagueStandings({
+        title: 'リーグ戦 順位表', termLabel,
+        classes: this._pdfStandingsData(league, classes),
+        onePerPage: document.getElementById('league-pdf-perpage').checked,
+      }, { orientation });
+    } else {
+      await PDF.exportLeagueCrossTables({
+        title: 'リーグ戦 対戦表', termLabel,
+        classes: this._pdfCrossData(league, classes),
+      }, { orientation });
+    }
+  },
+
+  /** 順位表 PDF 用のデータ（昇降級の予定と、未決定の同点を印にする） */
+  _pdfStandingsData(league, classes) {
+    const term = this._getCurrentTerm(league);
+    const pmap = this._playerMap();
+    const plan = this._tiers(league).length >= 2 ? this._promotionPlan(league) : null;
+    return classes.map(cls => {
+      const st = this._classStandings(league, term, cls.id);
+      const mv = plan?.moves[cls.id] || { up: [], down: [] };
+      const undecided = new Set((plan?.ties || [])
+        .filter(t => t.classId === cls.id && !this._tieChoices[t.key]).flatMap(t => t.range));
+      return {
+        name: cls.name,
+        rows: st.map((s, i) => ({
+          pos: i + 1, name: pmap[s.id]?.name || '?', w: s.w, l: s.l, d: s.d, pts: s.pts,
+          mark: undecided.has(s.id) ? 'tie' : mv.up.includes(s.id) ? 'promote' : mv.down.includes(s.id) ? 'demote' : null,
+        })),
+      };
+    });
+  },
+
+  /** 対戦表（星取り表）PDF 用のデータ */
+  _pdfCrossData(league, classes) {
+    const term = this._getCurrentTerm(league);
+    const pmap = this._playerMap();
+    return classes.map(cls => {
+      const ids = this._activeMemberIds(league, cls.id);
+      const matches = term.matches[cls.id] || [];
+      const sums = ids.map(() => ({ w: 0, l: 0, d: 0 }));
+      const cells = ids.map((rowId, i) => ids.map((colId, j) => {
+        if (i === j) return 'self';
+        const m = matches.find(x => (x.p1Id === rowId && x.p2Id === colId) || (x.p1Id === colId && x.p2Id === rowId));
+        if (!m || !m.result) return null;
+        const res = m.result === 'draw' ? 'draw' : ((m.result === 'p1' ? m.p1Id : m.p2Id) === rowId ? 'win' : 'loss');
+        sums[i][res === 'win' ? 'w' : res === 'loss' ? 'l' : 'd']++;
+        return res;
+      }));
+      return { name: cls.name, players: ids.map(id => pmap[id]?.name || '?'), cells, sums };
+    });
   },
 
   // ============================================

@@ -680,6 +680,80 @@ const UI = {
       </svg>`;
   },
 
+  /**
+   * 個人成績書 PDF（1人1ページ）。
+   * この部屋の内戦の結果・この期のリーグ戦の結果、部の名簿にひも付いた選手は通算成績も載せる。
+   */
+  async exportPlayerReports(playerIds, opts = {}) {
+    const players = AppStorage.getPlayers();
+    const pmap = Object.fromEntries(players.map(p => [p.id, p]));
+    const rounds = AppStorage.getRounds();
+    const league = AppStorage.getLeague();
+    const standings = rounds.length > 0 ? Matching.calculateStandings(players, rounds, true) : [];
+    const resultText = { win: '○ 勝ち', loss: '● 負け', draw: '△ 引き分け', bye: '不戦勝', null: '未入力' };
+    const showSenteGote = parseInt(document.getElementById('sente-gote-weight')?.value ?? '1') === 1;
+    const leagueOn = !!league.enabled;
+    const term = leagueOn ? (league.terms || []).find(t => t.term === league.currentTerm) : null;
+
+    const reports = await Promise.all(playerIds.map(async id => {
+      const p = pmap[id];
+      if (!p) return null;
+      const meta = [`${p.grade}年`];
+      const summary = [];
+      const sections = [];
+
+      // リーグ戦（この期）
+      const member = leagueOn ? (league.members || []).find(m => m.playerId === id) : null;
+      const cls = member ? (league.classes || []).find(c => c.id === member.classId) : null;
+      if (cls) {
+        meta.push(cls.name);
+        const st = League._classStandings(league, League._getCurrentTerm(league), cls.id);
+        const idx = st.findIndex(s => s.id === id);
+        if (idx >= 0) {
+          const s = st[idx];
+          summary.push({ label: `リーグ第${league.currentTerm}期`, value: `${s.w}勝${s.l}敗${s.d ? `${s.d}分` : ''}` });
+          summary.push({ label: '階級内の順位', value: `${idx + 1}位 / ${st.length}人` });
+        }
+        const rows = (term?.matches?.[cls.id] || []).filter(m => m.p1Id === id || m.p2Id === id).map((m, i) => {
+          const isP1 = m.p1Id === id;
+          const res = !m.result ? null : m.result === 'draw' ? 'draw' : ((m.result === 'p1') === isP1 ? 'win' : 'loss');
+          return [String(i + 1), pmap[isP1 ? m.p2Id : m.p1Id]?.name || '?', isP1 ? '先手' : '後手', resultText[res]];
+        });
+        sections.push({ title: `リーグ戦 第${league.currentTerm}期（${cls.name}）`, head: ['#', '対戦相手', '先後', '結果'], rows });
+      }
+
+      // 内戦（この部屋）
+      if (rounds.length > 0) {
+        const s = standings.find(x => x.id === id);
+        if (s) {
+          summary.push({ label: '内戦の順位', value: `${s.position}位` });
+          summary.push({ label: '内戦の成績', value: `${s.wins}勝${s.losses}敗${s.draws ? `${s.draws}分` : ''}${s.byes ? ` 不戦勝${s.byes}` : ''}` });
+        }
+        const rows = this._getPlayerHistory(id, rounds).map(h => h.type === 'bye'
+          ? [`第${h.roundNumber}回戦`, '—', '—', resultText.bye]
+          : [`第${h.roundNumber}回戦`, h.opponentName, showSenteGote ? (h.side === 'player1' ? '先手' : '後手') : '—', resultText[h.result]]);
+        sections.push({ title: '内戦', head: ['回戦', '対戦相手', '先後', '結果'], rows });
+      }
+
+      // レーティング・部での通算成績
+      if (!Matching.hasNoRating(p)) meta.push(`レーティング ${this.formatRating(p.rating)}`);
+      if (p.clubPlayerId) {
+        try {
+          const games = await AppStorage.getPlayerCareer(p.clubPlayerId);
+          if (games.length > 0) {
+            const c = LeagueLogic.careerStats(games.map(g => ({ outcome: g.outcome, sente: g.sente })));
+            summary.push({ label: '部での通算', value: `${c.total.wins}勝${c.total.losses}敗${c.total.draws ? `${c.total.draws}分` : ''}（${(c.total.winRate * 100).toFixed(1)}%）` });
+          }
+        } catch {}
+      }
+      return { name: p.name, meta, summary, sections };
+    }));
+
+    const valid = reports.filter(Boolean);
+    if (valid.length === 0) { this.showToast('出力できる選手がいません', 'error'); return; }
+    await PDF.exportPlayerReports(valid, opts);
+  },
+
   /** 部屋を部にひも付けるダイアログ */
   _showClubLink(roomId) {
     const modal = document.getElementById('club-link-modal');
@@ -2344,6 +2418,9 @@ const UI = {
           <span class="pd-grade">${player.grade}年</span>
         </div>
         <div class="pd-position">${stat.position ? `<span class="pd-pos-num">${stat.position}</span>位` : '—'}</div>
+      </div>
+      <div class="pd-actions">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="UI.exportPlayerReports(['${player.id}'])">📄 個人成績書 PDF</button>
       </div>
 
       <div class="pd-summary">

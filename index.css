@@ -3208,3 +3208,9 @@ body::before {
 .career-chart-value { font-size: 11px; fill: var(--text-secondary); }
 .career-chart-label { font-size: 10px; fill: var(--text-muted); }
 .pd-career-btn { float: right; padding: 2px 8px; font-size: 12px; }
+
+/* --- PDF 出力（リーグ戦）・個人成績書 --- */
+.league-pdf-form { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; margin: 12px 0 6px; }
+.league-pdf-form .roster-check { grid-column: 1 / -1; }
+.league-header { gap: 8px; }
+.pd-actions { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
