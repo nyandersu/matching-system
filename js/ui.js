@@ -402,6 +402,7 @@ const UI = {
           <td>${this.escapeHtml(this.formatRating(p.rating))}</td>
           <td class="roster-actions">
             <button type="button" class="btn btn-ghost btn-sm" onclick="UI._editRosterPlayer('${p.id}')">編集</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="UI.showCareer('${p.id}', '${this.escapeHtml(p.name).replace(/'/g, '&#39;')}')">成績</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="UI._toggleRatingHistory('${p.id}')">履歴</button>
             <button type="button" class="btn btn-ghost btn-sm" onclick="UI._toggleRetired('${p.id}')">${p.retired ? '復帰' : '引退'}</button>
           </td>
@@ -562,6 +563,121 @@ const UI = {
             <span class="history-meta">${p.grade ? `${p.grade}年` : ''}${p.rank ? `・${p.rank}` : ''}${Matching.hasNoRating(p) ? '' : `・レート ${this.escapeHtml(this.formatRating(p.rating))}`}</span>
           </span>
         </label>`).join('');
+  },
+
+  /**
+   * 通算成績（部にひも付いた全部屋の内戦・リーグ戦）。
+   * 通算・連勝連敗・先後別・対戦相手別・直近の対局、リーグ戦の級とレーティングの推移。
+   */
+  async showCareer(clubPlayerId, name) {
+    const modal = document.getElementById('career-modal');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      document.getElementById('career-close').addEventListener('click', () => modal.classList.add('hidden'));
+      modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+    }
+    const content = document.getElementById('career-content');
+    content.innerHTML = `<h3 class="pt-info-title">${this.escapeHtml(name)} の通算成績</h3><p class="history-empty">読み込み中...</p>`;
+    modal.classList.remove('hidden');
+
+    let games, ratings;
+    try {
+      [games, ratings] = await Promise.all([
+        AppStorage.getPlayerCareer(clubPlayerId),
+        AppStorage.listRatingHistory(clubPlayerId).catch(() => []),
+      ]);
+    } catch (err) {
+      content.innerHTML = `<h3 class="pt-info-title">${this.escapeHtml(name)} の通算成績</h3><p class="history-empty">${this.escapeHtml(err.message)}</p>`;
+      return;
+    }
+
+    const stats = LeagueLogic.careerStats(games.map(g => ({
+      outcome: g.outcome, sente: g.sente, opponentId: g.opponent_club_player_id, opponentName: g.opponent_name || '?',
+    })));
+    const rec = s => `${s.wins}勝${s.losses}敗${s.draws ? `${s.draws}分` : ''}`;
+    const pct = s => (s.played ? `${(s.winRate * 100).toFixed(1)}%` : '—');
+    const where = g => g.kind === 'league'
+      ? `${this.escapeHtml(g.room_id)} リーグ第${g.round_no}期${g.class_name ? ` ${this.escapeHtml(g.class_name)}` : ''}`
+      : `${this.escapeHtml(g.room_id)} 第${g.round_no}回戦`;
+    const mark = { W: '<span class="pd-result win">○ 勝</span>', L: '<span class="pd-result loss">● 敗</span>', D: '<span class="pd-result draw">△ 分</span>' };
+
+    // リーグ戦の級の推移（期ごと）
+    const leaguePoints = [];
+    games.filter(g => g.kind === 'league' && g.class_tier != null).forEach(g => {
+      const key = `${g.room_id}#${g.round_no}`;
+      if (!leaguePoints.some(p => p.key === key)) leaguePoints.push({ key, label: `第${g.round_no}期`, value: g.class_tier, name: g.class_name });
+    });
+    const ratingPoints = ratings.map((h, i) => ({ label: String(i + 1), value: Number(h.after) }));
+    if (ratings.length > 0) ratingPoints.unshift({ label: '0', value: Number(ratings[0].before) });
+
+    content.innerHTML = `
+      <h3 class="pt-info-title">${this.escapeHtml(name)} の通算成績</h3>
+      ${games.length === 0 ? '<p class="history-empty">まだ結果が入力された対局はありません（部にひも付いた部屋の対局が対象です）</p>' : `
+      <div class="pd-summary career-summary">
+        <div class="pd-stat-box"><span class="pd-stat-val">${stats.total.played}</span><span class="pd-stat-lbl">対局</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val win-color">${stats.total.wins}</span><span class="pd-stat-lbl">勝</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val loss-color">${stats.total.losses}</span><span class="pd-stat-lbl">敗</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val">${stats.total.draws}</span><span class="pd-stat-lbl">分</span></div>
+        <div class="pd-stat-box"><span class="pd-stat-val">${pct(stats.total)}</span><span class="pd-stat-lbl">勝率</span></div>
+      </div>
+      <div class="career-facts">
+        <div><span class="career-fact-label">最長連勝</span><strong>${stats.streaks.longestWin}</strong></div>
+        <div><span class="career-fact-label">最長連敗</span><strong>${stats.streaks.longestLose}</strong></div>
+        <div><span class="career-fact-label">現在</span><strong>${stats.streaks.currentWin ? `${stats.streaks.currentWin}連勝中` : stats.streaks.currentLose ? `${stats.streaks.currentLose}連敗中` : '—'}</strong></div>
+        <div><span class="career-fact-label">先手</span><strong>${rec(stats.sente)}</strong> <span class="opp-muted">${pct(stats.sente)}</span></div>
+        <div><span class="career-fact-label">後手</span><strong>${rec(stats.gote)}</strong> <span class="opp-muted">${pct(stats.gote)}</span></div>
+      </div>
+      <p class="pt-info-note">勝率は引き分けを0.5勝として計算。先手・後手は対戦表の左側（先手）・右側で集計しています（先後指定なしで行った内戦も含みます）。連勝・連敗は部屋の作成順・回戦順に並べて数えています。</p>`}
+
+      ${leaguePoints.length >= 2 ? `
+      <div class="pd-section"><h3 class="pd-section-title">リーグ戦の級の推移</h3>
+        ${this._lineChartSvg(leaguePoints, { invert: true, valueLabel: p => p.name || '' })}</div>` : ''}
+      ${ratingPoints.length >= 2 ? `
+      <div class="pd-section"><h3 class="pd-section-title">レーティングの推移</h3>
+        ${this._lineChartSvg(ratingPoints, { valueLabel: p => this.formatRating(p.value) })}</div>` : ''}
+
+      ${stats.opponents.length > 0 ? `
+      <div class="pd-section"><h3 class="pd-section-title">対戦相手別</h3>
+        <div class="opp-strength-table-wrapper"><table class="opp-strength-table">
+          <thead><tr><th>相手</th><th>対局</th><th>成績</th><th>勝率</th></tr></thead>
+          <tbody>${stats.opponents.slice(0, 20).map(o => `
+            <tr><td class="opp-name">${this.escapeHtml(o.name)}</td><td>${o.played}</td><td>${rec(o)}</td><td>${pct(o)}</td></tr>`).join('')}
+          </tbody></table></div></div>` : ''}
+
+      ${games.length > 0 ? `
+      <div class="pd-section"><h3 class="pd-section-title">直近の対局</h3>
+        <table class="pd-history-table"><tbody>${games.slice(-20).reverse().map(g => `
+          <tr><td class="pd-round">${where(g)}</td>
+              <td class="pd-opponent"><span class="pd-opp-name">${this.escapeHtml(g.opponent_name || '?')}</span>
+                <span class="pd-opp-meta">${g.sente ? '先手' : '後手'}</span></td>
+              <td>${mark[g.outcome] || ''}</td></tr>`).join('')}
+        </tbody></table></div>` : ''}`;
+  },
+
+  /**
+   * 折れ線グラフ（SVG）。points: [{ label, value }]。invert=true で値が小さいほど上（級の推移用）
+   */
+  _lineChartSvg(points, { invert = false, valueLabel = () => '' } = {}) {
+    const W = 560, H = 160, pad = { l: 16, r: 16, t: 22, b: 24 };
+    const vals = points.map(p => p.value);
+    let min = Math.min(...vals), max = Math.max(...vals);
+    if (min === max) { min -= 1; max += 1; }
+    const x = i => pad.l + (points.length === 1 ? 0 : i * (W - pad.l - pad.r) / (points.length - 1));
+    const y = v => {
+      const r = (v - min) / (max - min);
+      return pad.t + (invert ? r : 1 - r) * (H - pad.t - pad.b);
+    };
+    const path = points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.value).toFixed(1)}`).join(' ');
+    const showEvery = Math.ceil(points.length / 12);
+    return `
+      <svg class="career-chart" viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="none">
+        <path d="${path}" fill="none" stroke="var(--amber-light)" stroke-width="2"/>
+        ${points.map((p, i) => `
+          <circle cx="${x(i).toFixed(1)}" cy="${y(p.value).toFixed(1)}" r="3.5" fill="var(--amber)"/>
+          ${i % showEvery === 0 || i === points.length - 1 ? `
+          <text x="${x(i).toFixed(1)}" y="${(y(p.value) - 8).toFixed(1)}" text-anchor="middle" class="career-chart-value">${this.escapeHtml(valueLabel(p))}</text>
+          <text x="${x(i).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="career-chart-label">${this.escapeHtml(p.label)}</text>` : ''}`).join('')}
+      </svg>`;
   },
 
   /** 部屋を部にひも付けるダイアログ */
@@ -2251,7 +2367,8 @@ const UI = {
 
       ${player.clubPlayerId ? `
       <div class="pd-section">
-        <h3 class="pd-section-title">レーティングの推移（部の名簿）</h3>
+        <h3 class="pd-section-title">レーティングの推移（部の名簿）
+          <button type="button" class="btn btn-ghost btn-sm pd-career-btn" onclick="UI.showCareer('${player.clubPlayerId}', '${this.escapeHtml(player.name).replace(/'/g, '&#39;')}')">部での通算成績 ›</button></h3>
         <div id="pd-rating-history" class="opp-muted">読み込み中...</div>
       </div>` : ''}
 

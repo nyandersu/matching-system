@@ -3139,3 +3139,72 @@ body::before {
 .rating-history-list { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
 .roster-pick-item { cursor: pointer; }
 .room-history-link { font-size: 12px; }
+
+/* --- リーグ戦：級・並設グループ --- */
+.league-tier {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.015);
+}
+.league-tier-head {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  flex-wrap: wrap;
+}
+.league-tier-title { flex: 1; font-size: 13px; color: var(--text-secondary); }
+.league-tier .league-class-row { border: none; background: transparent; padding: 2px 4px; }
+.league-tier .league-class-row .league-class-name-input { flex: 1; }
+.league-class-sibling { padding-left: 24px !important; }
+.league-icon-btn.league-text-btn { width: auto; padding: 0 8px; }
+.league-settings { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 8px; }
+.league-setting { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+.league-swap-hint { font-size: 12px; color: var(--text-muted); }
+
+/* 昇降級の境目が同点（プレーオフ） */
+.league-tie {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(230, 168, 23, 0.4);
+  border-radius: var(--radius-sm);
+  background: var(--amber-glow);
+}
+.league-tie-title { font-size: 12px; color: var(--amber-light); }
+.league-tie-options { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
+.league-tie-options label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.league-tie-warn { font-size: 12px; color: var(--accent-red); }
+
+/* 過去の期・級の推移 */
+.league-history-select { max-width: 200px; }
+.league-history-table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.league-history-table th, .league-history-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: center; }
+.league-history-table th.ls-name { text-align: left; }
+.league-tier-cell { font-weight: 600; }
+.league-tier-1 { color: var(--amber-light); }
+.league-tier-2 { color: var(--accent-red); }
+.league-tier-3 { color: var(--accent-blue); }
+.league-tier-4 { color: var(--accent-green); }
+.league-tier-5, .league-tier-6 { color: var(--text-secondary); }
+
+/* --- 通算成績 --- */
+.career-card { max-width: 640px; }
+.career-summary { margin: 12px 0; }
+.career-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 16px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.career-fact-label { color: var(--text-muted); margin-right: 8px; font-size: 12px; }
+.career-chart { width: 100%; height: 160px; display: block; }
+.career-chart-value { font-size: 11px; fill: var(--text-secondary); }
+.career-chart-label { font-size: 10px; fill: var(--text-muted); }
+.pd-career-btn { float: right; padding: 2px 8px; font-size: 12px; }

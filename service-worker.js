@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shogi-match-v18';
+const CACHE_NAME = 'shogi-match-v20';
 const ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,7 @@ const ASSETS = [
   './js/matching.js',
   './js/ui.js',
   './js/pdf.js',
+  './js/leagueLogic.js',
   './js/league.js',
   './manifest.json',
 ];

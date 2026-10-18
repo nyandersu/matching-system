@@ -77,6 +77,8 @@ const League = {
       body = this._renderMatchesView(league);
     } else if (this.subView === 'standings') {
       body = this._renderStandingsView(league);
+    } else if (this.subView === 'history') {
+      body = this._renderHistoryView(league);
     } else {
       body = this._renderClassSection(league) + this._renderMemberSection(league);
     }
@@ -93,6 +95,7 @@ const League = {
       { id: 'manage',    label: '階級・選手' },
       { id: 'matches',   label: '対局・結果' },
       { id: 'standings', label: '順位表' },
+      { id: 'history',   label: '過去の期' },
     ];
     return `
       <div class="league-subnav">
@@ -135,43 +138,300 @@ const League = {
       </div>`;
   },
 
-  /** 階級管理セクション */
+  /** リーグ戦の設定（昇降級の割合・1グループの目標人数） */
+  _settings(league) {
+    return { ratio: 0.25, targetSize: 8, ...(league.settings || {}) };
+  },
+
+  /**
+   * 級（tier）の補完と並べ替え。
+   * 旧データ（tier なし）は上から順に別々の級として扱う。同じ tier の階級は並設グループ。
+   * tier は 1 から連番に振り直す。
+   */
+  _normalize(league) {
+    const classes = league.classes || (league.classes = []);
+    let prev = 0;
+    classes.forEach(c => {
+      if (!Number.isFinite(c.tier)) c.tier = prev + 1;
+      prev = c.tier;
+    });
+    classes.sort((a, b) => a.tier - b.tier);   // 安定ソート：同じ級の中の順番は保つ
+    const map = new Map();
+    classes.forEach(c => { if (!map.has(c.tier)) map.set(c.tier, map.size + 1); });
+    classes.forEach(c => { c.tier = map.get(c.tier); });
+    return league;
+  },
+
+  /** 級ごとにまとめた階級 [{ tier, classes }]（上の級から） */
+  _tiers(league) {
+    this._normalize(league);
+    const out = [];
+    (league.classes || []).forEach(c => {
+      let t = out.find(x => x.tier === c.tier);
+      if (!t) { t = { tier: c.tier, classes: [] }; out.push(t); }
+      t.classes.push(c);
+    });
+    return out;
+  },
+
+  /** 級の名前（並設グループの添字を除いた名前） */
+  _tierName(t) {
+    return LeagueLogic.stripSiblingSuffix(t.classes[0].name);
+  },
+
+  /**
+   * 選手の強い順（グループ分け・自動再編の並び順）。
+   * 直前に確定した期の順位（上の級から、級内の順位順）→ レーティング → ランク → 名前。
+   */
+  _seedOrder(league, ids) {
+    const lastTerm = (league.terms || []).filter(t => t.finalized && t.memberSnapshot)
+      .sort((a, b) => b.term - a.term)[0];
+    const snap = new Map((lastTerm?.memberSnapshot || []).map(s => [s.playerId, s]));
+    const pmap = this._playerMap();
+    const rankOrder = { S: 0, A: 1, B: 2, C: 3 };
+    const key = id => {
+      const s = snap.get(id);
+      const p = pmap[id] || {};
+      return [
+        s ? s.tier : Infinity,
+        s && s.finalRank != null ? s.finalRank : Infinity,
+        Matching.hasNoRating(p) ? Infinity : -Number(p.rating),
+        rankOrder[p.rank] ?? 9,
+      ];
+    };
+    return [...ids].sort((a, b) => {
+      const ka = key(a), kb = key(b);
+      for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+      return String(pmap[a]?.name || '').localeCompare(String(pmap[b]?.name || ''), 'ja');
+    });
+  },
+
+  /** 指定した階級に、結果入力済みの対局があるか */
+  _hasResults(league, classIds) {
+    const term = this._getCurrentTerm(league);
+    return classIds.some(id => (term.matches[id] || []).some(m => m.result));
+  },
+
+  /** 階級管理セクション（級ごと。同じ級を複数のグループに分けられる） */
   _renderClassSection(league) {
-    const classes = league.classes || [];
+    const tiers = this._tiers(league);
+    const settings = this._settings(league);
+    const memberCount = id => (league.members || []).filter(m => m.classId === id).length;
+
     let rows = '';
-    classes.forEach((cls, i) => {
-      const memberCount = (league.members || []).filter(m => m.classId === cls.id).length;
+    tiers.forEach((t, ti) => {
+      const total = t.classes.reduce((n, c) => n + memberCount(c.id), 0);
+      const multi = t.classes.length > 1;
       rows += `
-        <div class="league-class-row">
-          <span class="league-class-order">${i + 1}</span>
-          <input type="text" class="league-class-name-input"
-                 value="${this._esc(cls.name)}" maxlength="16"
-                 onchange="League.renameClass('${cls.id}', this.value)">
-          <span class="league-class-count">${memberCount}名</span>
-          <div class="league-class-actions">
-            <button class="league-icon-btn" title="上へ" ${i === 0 ? 'disabled' : ''}
-                    onclick="League.moveClass('${cls.id}', -1)">▲</button>
-            <button class="league-icon-btn" title="下へ" ${i === classes.length - 1 ? 'disabled' : ''}
-                    onclick="League.moveClass('${cls.id}', 1)">▼</button>
-            <button class="league-icon-btn league-icon-danger" title="削除"
-                    onclick="League.deleteClass('${cls.id}')">✕</button>
+        <div class="league-tier">
+          <div class="league-tier-head">
+            <span class="league-class-order">${ti + 1}</span>
+            <span class="league-tier-title">${multi ? `${this._esc(this._tierName(t))}（${t.classes.length}グループ）` : ''}</span>
+            <span class="league-class-count">${total}名</span>
+            <div class="league-class-actions">
+              <button class="league-icon-btn" title="上へ" ${ti === 0 ? 'disabled' : ''}
+                      onclick="League.moveTier(${t.tier}, -1)">▲</button>
+              <button class="league-icon-btn" title="下へ" ${ti === tiers.length - 1 ? 'disabled' : ''}
+                      onclick="League.moveTier(${t.tier}, 1)">▼</button>
+              <button class="league-icon-btn league-text-btn" title="この級を複数のグループに分ける"
+                      onclick="League.splitTier(${t.tier})">分ける</button>
+              ${multi ? `<button class="league-icon-btn league-text-btn" title="グループを1つにまとめる"
+                      onclick="League.mergeTier(${t.tier})">まとめる</button>` : ''}
+            </div>
           </div>
+          ${t.classes.map(cls => `
+            <div class="league-class-row ${multi ? 'league-class-sibling' : ''}">
+              <input type="text" class="league-class-name-input"
+                     value="${this._esc(cls.name)}" maxlength="16"
+                     onchange="League.renameClass('${cls.id}', this.value)">
+              ${multi ? `<span class="league-class-count">${memberCount(cls.id)}名</span>` : ''}
+              <button class="league-icon-btn league-icon-danger" title="削除"
+                      onclick="League.deleteClass('${cls.id}')">✕</button>
+            </div>`).join('')}
         </div>`;
     });
 
-    if (classes.length === 0) {
+    if (tiers.length === 0) {
       rows = `<p class="league-empty-hint">階級がまだありません。「階級を追加」で A級・B級 などを作成してください。</p>`;
     }
 
     return `
       <div class="card">
         <h2 class="card-title"><span class="icon">🏅</span> 階級</h2>
-        <p class="league-section-note">階級名はタップで編集できます。上にあるほど上位の階級です（▲▼で並び替え）。</p>
+        <p class="league-section-note">上にあるほど上位の級です（▲▼で並び替え、名前はタップで編集）。
+          人数が多い級は「分ける」で複数のグループ（甲・乙…）にでき、各グループで総当たりを行います。
+          グループに分けた級は、人数が減ると期の移行時に自動でまとまります。</p>
         <div class="league-class-list">${rows}</div>
         <button class="btn btn-secondary league-add-class-btn" onclick="League.addClass()">
           ＋ 階級を追加
         </button>
+      </div>
+      <div class="card">
+        <h2 class="card-title"><span class="icon">⚙</span> 昇降級と級の構成</h2>
+        <div class="league-settings">
+          <label class="league-setting">
+            <span>昇降級の割合</span>
+            <input type="number" class="league-swap-input" min="0" max="50" step="5"
+                   value="${Math.round(settings.ratio * 100)}"
+                   onchange="League.setSetting('ratio', this.value / 100)">
+            <span>%</span>
+          </label>
+          <label class="league-setting">
+            <span>1グループの目標人数</span>
+            <input type="number" class="league-swap-input" min="2" max="50"
+                   value="${settings.targetSize}"
+                   onchange="League.setSetting('targetSize', this.value)">
+            <span>人</span>
+          </label>
+        </div>
+        <p class="league-section-note">
+          昇降級の人数は、隣り合う級の少ない方の人数 × 割合（最低1人・半数まで）を初期値にし、順位表タブで調整できます。
+          目標人数は、グループ分けした級を期の移行時にまとめるかどうかと、下の「自動で作り直す」に使います。
+        </p>
+        <button class="btn btn-secondary" onclick="League.autoRestructure()">人数に合わせて階級を自動で作り直す</button>
       </div>`;
+  },
+
+  setSetting(key, value) {
+    const league = AppStorage.getLeague();
+    const settings = this._settings(league);
+    if (key === 'ratio') settings.ratio = Math.max(0, Math.min(0.5, Number(value) || 0));
+    if (key === 'targetSize') settings.targetSize = Math.max(2, Math.min(50, parseInt(value) || 8));
+    league.settings = settings;
+    AppStorage.saveLeague(league);
+    this._swapCounts = {};
+    this.render();
+  },
+
+  addClass() {
+    const league = this._normalize(AppStorage.getLeague());
+    const tiers = this._tiers(league);
+    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const idx = tiers.length;
+    const defaultName = idx < letters.length ? `${letters[idx]}級` : `第${idx + 1}階級`;
+    league.classes.push({ id: this._genClassId(), name: defaultName, tier: idx + 1 });
+    AppStorage.saveLeague(league);
+    this.render();
+  },
+
+  /** 級ごと上下に動かす（並設グループもまとめて動く） */
+  moveTier(tier, dir) {
+    const league = this._normalize(AppStorage.getLeague());
+    const other = tier + dir;
+    if (!league.classes.some(c => c.tier === other)) return;
+    league.classes.forEach(c => {
+      if (c.tier === tier) c.tier = other;
+      else if (c.tier === other) c.tier = tier;
+    });
+    this._normalize(league);
+    AppStorage.saveLeague(league);
+    this.render();
+  },
+
+  splitTier(tier) {
+    const league = this._normalize(AppStorage.getLeague());
+    const t = this._tiers(league).find(x => x.tier === tier);
+    if (!t) return;
+    const members = (league.members || []).filter(m => t.classes.some(c => c.id === m.classId));
+    const settings = this._settings(league);
+    const suggested = Math.max(2, LeagueLogic.desiredGroupCount(members.length, settings.targetSize));
+    const input = prompt(`「${this._tierName(t)}」（${members.length}名）をいくつのグループに分けますか？`, String(suggested));
+    if (input == null) return;
+    const k = parseInt(input);
+    if (!(k >= 2 && k <= 10)) { UI.showToast('2〜10で指定してください', 'error'); return; }
+    this._regroupTier(tier, k);
+  },
+
+  mergeTier(tier) {
+    const league = this._normalize(AppStorage.getLeague());
+    const t = this._tiers(league).find(x => x.tier === tier);
+    if (!t || !confirm(`「${this._tierName(t)}」のグループを1つにまとめますか？`)) return;
+    this._regroupTier(tier, 1);
+  },
+
+  /**
+   * 級のメンバーを k グループに組み直す（強い順にスネーク配分）。
+   * 結果入力済みの対局がある級はできない。総当たり表は組み直したグループで作り直す。
+   */
+  _regroupTier(tier, k) {
+    const league = this._normalize(AppStorage.getLeague());
+    const t = this._tiers(league).find(x => x.tier === tier);
+    if (!t) return;
+    const classIds = t.classes.map(c => c.id);
+    if (this._hasResults(league, classIds)) {
+      UI.showToast('結果を入力済みの対局があるため、この級のグループは変更できません（期の移行時に変更してください）', 'error');
+      return;
+    }
+    AppStorage.createSnapshot(`リーグ戦「${this._tierName(t)}」のグループを変更する前`);
+
+    const members = (league.members || []).filter(m => classIds.includes(m.classId));
+    const ordered = this._seedOrder(league, members.map(m => m.playerId));
+    const groups = LeagueLogic.distributeSnake(ordered, k);
+    const names = LeagueLogic.defaultSiblingNames(this._tierName(t), k);
+    const ids = groups.map((_, g) => classIds[g] || this._genClassId());
+
+    league.classes = league.classes.filter(c => c.tier !== tier || ids.includes(c.id));
+    ids.forEach((id, g) => {
+      let cls = league.classes.find(c => c.id === id);
+      if (!cls) { cls = { id, tier }; league.classes.push(cls); }
+      cls.name = names[g];
+      cls.tier = tier;
+    });
+    const groupOf = new Map();
+    groups.forEach((g, gi) => g.forEach(pid => groupOf.set(pid, ids[gi])));
+    members.forEach(m => { m.classId = groupOf.get(m.playerId); });
+
+    const term = this._getCurrentTerm(league);
+    const hadMatches = classIds.some(id => (term.matches[id] || []).length > 0);
+    classIds.forEach(id => { delete term.matches[id]; });
+    if (hadMatches) ids.forEach(id => { term.matches[id] = this._roundRobinMatches(league, id); });
+
+    this._normalize(league);
+    AppStorage.saveLeague(league);
+    this.render();
+    UI.showToast(k === 1 ? 'グループを1つにまとめました' : `${k}グループに分けました`, 'success');
+  },
+
+  /** 人数に合わせて階級を作り直す（自動再編） */
+  autoRestructure() {
+    const league = this._normalize(AppStorage.getLeague());
+    if (this._hasResults(league, (league.classes || []).map(c => c.id))) {
+      UI.showToast('この期に結果を入力済みの対局があるため、作り直せません（次の期の開始前に行ってください）', 'error');
+      return;
+    }
+    const members = league.members || [];
+    if (members.length === 0) { UI.showToast('階級に所属している選手がいません', 'error'); return; }
+    const settings = this._settings(league);
+    const plan = LeagueLogic.planAutoRestructure(this._seedOrder(league, members.map(m => m.playerId)), settings.targetSize);
+
+    // 既存の級の名前を上から引き継ぐ（足りない分は既定名）
+    const tiers = this._tiers(league);
+    plan.forEach((c, i) => { if (tiers[i]) c.name = this._tierName(tiers[i]); });
+    const summary = plan.map(c => `・${c.name}：${c.playerIds.length}名`).join('\n');
+    if (!confirm(`所属している${members.length}名を、目標${settings.targetSize}人で次の階級に分けます（強い順：前の期の順位→レーティング→ランク）。\n\n${summary}\n\n実行しますか？`)) return;
+    AppStorage.createSnapshot('リーグ戦の階級を自動で作り直す前');
+
+    const oldIds = (league.classes || []).map(c => c.id);
+    const term = this._getCurrentTerm(league);
+    const hadMatches = oldIds.some(id => (term.matches[id] || []).length > 0);
+    oldIds.forEach(id => { delete term.matches[id]; });
+
+    league.classes = plan.map((c, i) => ({ id: oldIds[i] || this._genClassId(), name: c.name, tier: i + 1 }));
+    const classOf = new Map();
+    plan.forEach((c, i) => c.playerIds.forEach(pid => classOf.set(pid, league.classes[i].id)));
+    members.forEach(m => { m.classId = classOf.get(m.playerId); });
+    if (hadMatches) league.classes.forEach(c => { term.matches[c.id] = this._roundRobinMatches(league, c.id); });
+
+    AppStorage.saveLeague(league);
+    this._swapCounts = {};
+    this.render();
+    UI.showToast(`${plan.length}つの階級に作り直しました`, 'success');
+  },
+
+  /** 階級の出場メンバーで総当たり表を作る（先手回数を均等に） */
+  _roundRobinMatches(league, classId) {
+    return LeagueLogic.roundRobin(this._activeMemberIds(league, classId))
+      .map(m => ({ id: this._genId(), p1Id: m.p1Id, p2Id: m.p2Id, result: null }));
   },
 
   /** 選手の階級割当セクション */
@@ -251,36 +511,12 @@ const League = {
     UI.showToast('リーグ戦モードを終了しました', 'info');
   },
 
-  addClass() {
-    const league = AppStorage.getLeague();
-    if (!league.classes) league.classes = [];
-    // デフォルト名：A級, B級, C級 …（既存数に応じて）
-    const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const idx = league.classes.length;
-    const defaultName = idx < letters.length ? `${letters[idx]}級` : `第${idx + 1}階級`;
-    league.classes.push({ id: this._genClassId(), name: defaultName });
-    AppStorage.saveLeague(league);
-    this.render();
-  },
-
   renameClass(classId, name) {
     const league = AppStorage.getLeague();
     const cls = (league.classes || []).find(c => c.id === classId);
     if (!cls) return;
     const trimmed = (name || '').trim();
     cls.name = trimmed || cls.name;
-    AppStorage.saveLeague(league);
-    this.render();
-  },
-
-  moveClass(classId, dir) {
-    const league = AppStorage.getLeague();
-    const classes = league.classes || [];
-    const i = classes.findIndex(c => c.id === classId);
-    if (i === -1) return;
-    const j = i + dir;
-    if (j < 0 || j >= classes.length) return;
-    [classes[i], classes[j]] = [classes[j], classes[i]];
     AppStorage.saveLeague(league);
     this.render();
   },
@@ -526,12 +762,18 @@ const League = {
     const kept = existing.filter(m => activeSet.has(m.p1Id) && activeSet.has(m.p2Id));
     const have = new Set(kept.map(m => pairKey(m.p1Id, m.p2Id)));
 
-    // 不足ペアを追加
+    // 不足ペアを追加（先手回数の少ない側を先手に）
+    const sente = {};
+    activeIds.forEach(id => { sente[id] = 0; });
+    kept.forEach(m => { if (m.p1Id in sente) sente[m.p1Id]++; });
     for (let i = 0; i < activeIds.length; i++) {
       for (let j = i + 1; j < activeIds.length; j++) {
         const k = pairKey(activeIds[i], activeIds[j]);
         if (!have.has(k)) {
-          kept.push({ id: this._genId(), p1Id: activeIds[i], p2Id: activeIds[j], result: null });
+          const [p1, p2] = sente[activeIds[j]] < sente[activeIds[i]]
+            ? [activeIds[j], activeIds[i]] : [activeIds[i], activeIds[j]];
+          sente[p1]++;
+          kept.push({ id: this._genId(), p1Id: p1, p2Id: p2, result: null });
         }
       }
     }
@@ -651,14 +893,7 @@ const League = {
     }
 
     (league.classes || []).forEach(cls => {
-      const ids = this._activeMemberIds(league, cls.id);
-      const matches = [];
-      for (let i = 0; i < ids.length; i++) {
-        for (let j = i + 1; j < ids.length; j++) {
-          matches.push({ id: this._genId(), p1Id: ids[i], p2Id: ids[j], result: null });
-        }
-      }
-      term.matches[cls.id] = matches;
+      term.matches[cls.id] = this._roundRobinMatches(league, cls.id);
     });
 
     AppStorage.saveLeague(league);
@@ -769,68 +1004,129 @@ const League = {
   // 昇降級・期の移行（Phase4）
   // ============================================
 
-  /**
-   * 各境界の推奨入替人数。
-   * リーグの秩序維持の目安として「隣接2階級の少ない方の約1/3」を提案。
-   * （上限は半数。中間階級は上下境界で最大 2×round(N/3) ≤ N となり破綻しない）
-   */
-  _suggestSwap(upperN, lowerN) {
-    const smaller = Math.min(upperN, lowerN);
-    if (smaller < 2) return 0;
-    const byThird = Math.round(smaller / 3);
-    return Math.max(1, Math.min(byThird, Math.floor(smaller / 2)));
-  },
+  /** 同点時のプレーオフ結果（classId:down|up → 移動する選手ID） */
+  _tieChoices: {},
 
   setSwapCount(boundaryIndex, value) {
     this._swapCounts[boundaryIndex] = Math.max(0, parseInt(value) || 0);
+    this._tieChoices = {};
     this.render();
+  },
+
+  setTieChoice(key, playerId, checked) {
+    const set = new Set(this._tieChoices[key] || this._lastPlan?.ties.find(t => t.key === key)?.chosen || []);
+    if (checked) set.add(playerId); else set.delete(playerId);
+    this._tieChoices[key] = [...set];
+    this.render();
+  },
+
+  /**
+   * 昇降級の計画（級の境界ごと）。
+   * - 入替人数の初期値は「隣り合う級の少ない方の出場者数 × 割合」。境界ごとに変更できる
+   * - 級をグループに分けている場合、人数は各グループへ按分（上位グループから）
+   * - 境目が同点の場合は自動では決めず、プレーオフの結果で移動する選手を選ぶ
+   */
+  _promotionPlan(league) {
+    const term = this._getCurrentTerm(league);
+    const tiers = this._tiers(league);
+    const settings = this._settings(league);
+    const groups = tiers.map(t => t.classes.map(cls => ({ cls, standings: this._classStandings(league, term, cls.id) })));
+    const activeByTier = groups.map(gs => gs.reduce((n, g) => n + g.standings.length, 0));
+    const suggested = LeagueLogic.ratioSwapCounts(activeByTier, settings.ratio);
+
+    const moves = {};   // classId → { down: [], up: [] }
+    groups.flat().forEach(g => { moves[g.cls.id] = { down: [], up: [] }; });
+    const ties = [];
+
+    // 上から cut 人（dir='up'）／下から（dir='down'）を選ぶ。境目が同点ならプレーオフの選択を使う
+    const pick = (g, n, dir) => {
+      const st = g.standings;
+      n = Math.min(n, st.length);
+      if (n <= 0) return [];
+      const cut = dir === 'up' ? n : st.length - n;
+      const tie = LeagueLogic.tieAtCut(st, cut);
+      const base = dir === 'up' ? st.slice(0, n) : st.slice(cut);
+      if (!tie.tied) return base.map(s => s.id);
+      const range = st.slice(tie.from, tie.to).map(s => s.id);
+      const need = dir === 'up' ? cut - tie.from : tie.to - cut;
+      const key = `${g.cls.id}:${dir}`;
+      const fallback = dir === 'up' ? range.slice(0, need) : range.slice(range.length - need);
+      const chosen = (this._tieChoices[key] || fallback).filter(id => range.includes(id));
+      ties.push({ key, classId: g.cls.id, className: g.cls.name, dir, range, need, chosen, ok: chosen.length === need });
+      const fixed = dir === 'up' ? st.slice(0, tie.from) : st.slice(tie.to);
+      return [...fixed.map(s => s.id), ...chosen];
+    };
+
+    const boundaries = suggested.map((sug, i) => {
+      const max = Math.min(activeByTier[i], activeByTier[i + 1]);
+      const count = Math.max(0, Math.min(this._swapCounts[i] ?? sug, max));
+      const relParts = LeagueLogic.apportion(count, groups[i].length);
+      const proParts = LeagueLogic.apportion(count, groups[i + 1].length);
+      groups[i].forEach((g, gi) => { moves[g.cls.id].down = pick(g, relParts[gi], 'down'); });
+      groups[i + 1].forEach((g, gi) => { moves[g.cls.id].up = pick(g, proParts[gi], 'up'); });
+      return { index: i, upper: tiers[i], lower: tiers[i + 1], count, suggested: sug, max,
+               upperGroups: groups[i], lowerGroups: groups[i + 1] };
+    });
+
+    const plan = { tiers, groups, boundaries, moves, ties, settings };
+    this._lastPlan = plan;
+    return plan;
   },
 
   /** 昇降級セクション（順位表ビュー末尾に表示） */
   _renderPromotionSection(league, term) {
-    const classes = league.classes || [];
-    if (classes.length < 2) {
-      return `<div class="card"><p class="league-empty-hint">階級が2つ以上あると昇降級・期の移行を行えます。</p></div>`;
+    const tiers = this._tiers(league);
+    if (tiers.length < 2) {
+      return `<div class="card"><p class="league-empty-hint">級が2つ以上あると昇降級・期の移行を行えます。</p></div>`;
     }
+    const plan = this._promotionPlan(league);
     const pmap = this._playerMap();
-    const nameList = (arr) =>
-      arr.map(s => this._esc(pmap[s.id] ? pmap[s.id].name : '?')).join('、') || '—';
-
-    let rows = '';
-    for (let i = 0; i < classes.length - 1; i++) {
-      const upper = classes[i], lower = classes[i + 1];
-      const upperStand = this._classStandings(league, term, upper.id);
-      const lowerStand = this._classStandings(league, term, lower.id);
-      const maxSwap = Math.min(upperStand.length, lowerStand.length);
-      const suggested = this._suggestSwap(upperStand.length, lowerStand.length);
-      const swap = Math.min(this._swapCounts[i] != null ? this._swapCounts[i] : suggested, maxSwap);
-      const demoted  = swap > 0 ? upperStand.slice(-swap) : [];
-      const promoted = swap > 0 ? lowerStand.slice(0, swap) : [];
-
-      rows += `
-        <div class="league-boundary">
-          <div class="league-boundary-head">
-            <span class="league-boundary-title">${this._esc(upper.name)} ⇅ ${this._esc(lower.name)}</span>
-            <div class="league-boundary-ctrl">
-              <input type="number" class="league-swap-input" min="0" max="${maxSwap}"
-                     value="${swap}" onchange="League.setSwapCount(${i}, this.value)">
-              <span>名ずつ入替</span>
-            </div>
+    const name = id => this._esc(pmap[id] ? pmap[id].name : '?');
+    const nameList = ids => ids.map(name).join('、') || '—';
+    const tieHtml = (classId, dir) => {
+      const t = plan.ties.find(x => x.key === `${classId}:${dir}`);
+      if (!t) return '';
+      return `
+        <div class="league-tie">
+          <span class="league-tie-title">⚠ 境目が同点です。プレーオフの結果で${dir === 'up' ? '昇級' : '降級'}する${t.need}名を選んでください</span>
+          <div class="league-tie-options">
+            ${t.range.map(id => `
+              <label><input type="checkbox" ${t.chosen.includes(id) ? 'checked' : ''}
+                onchange="League.setTieChoice('${t.key}', '${id}', this.checked)"> ${name(id)}</label>`).join('')}
           </div>
-          <div class="league-boundary-preview">
-            <span class="lb-demote">▼ ${this._esc(upper.name)} 降級: ${nameList(demoted)}</span>
-            <span class="lb-promote">▲ ${this._esc(lower.name)} 昇級: ${nameList(promoted)}</span>
-          </div>
+          ${t.ok ? '' : `<span class="league-tie-warn">${t.chosen.length}名選択中（${t.need}名選んでください）</span>`}
         </div>`;
-    }
+    };
+
+    const rows = plan.boundaries.map(b => `
+      <div class="league-boundary">
+        <div class="league-boundary-head">
+          <span class="league-boundary-title">${this._esc(this._tierName(b.upper))} ⇅ ${this._esc(this._tierName(b.lower))}</span>
+          <div class="league-boundary-ctrl">
+            <input type="number" class="league-swap-input" min="0" max="${b.max}"
+                   value="${b.count}" onchange="League.setSwapCount(${b.index}, this.value)">
+            <span>名ずつ入替</span>
+            ${b.count !== b.suggested ? `<span class="league-swap-hint">（割合では${b.suggested}名）</span>` : ''}
+          </div>
+        </div>
+        <div class="league-boundary-preview">
+          ${b.upperGroups.map(g => `
+            <span class="lb-demote">▼ ${this._esc(g.cls.name)} 降級: ${nameList(plan.moves[g.cls.id].down)}</span>
+            ${tieHtml(g.cls.id, 'down')}`).join('')}
+          ${b.lowerGroups.map(g => `
+            <span class="lb-promote">▲ ${this._esc(g.cls.name)} 昇級: ${nameList(plan.moves[g.cls.id].up)}</span>
+            ${tieHtml(g.cls.id, 'up')}`).join('')}
+        </div>
+      </div>`).join('');
 
     return `
       <div class="card">
         <h3 class="league-class-heading">昇降級・期の移行</h3>
         <p class="league-section-note">
-          各階級の下位者が降級・下位階級の上位者が昇級します。入替人数は調整できます
-          （リーグの秩序を保つ目安として各階級の約1/3を提案）。
-          休場者は順位対象外・階級維持です。
+          各級の下位者が降級し、下の級の上位者が昇級します。入替人数の初期値は
+          「隣り合う級の少ない方の出場者数 × ${Math.round(plan.settings.ratio * 100)}%」です（階級・選手タブで変更できます）。
+          グループに分けた級は、人数を各グループに割り振ります。休場者は順位対象外で、級を維持します。
+          境目が同点のときは、プレーオフの結果で移動する選手を選んでください。
         </p>
         ${rows}
         <button class="btn btn-primary league-finalize-btn" onclick="League.finalizeTerm()">
@@ -839,79 +1135,210 @@ const League = {
       </div>`;
   },
 
-  /** 現在の期を確定し、昇降級を適用して次の期へ進む */
+  /**
+   * 現在の期を確定し、昇降級を適用して次の期へ進む。
+   * 次の期のグループ数は、級ごとの人数と目標人数から決める（自動では増やさず、人数が減ればまとめる）。
+   * グループに分ける級は、成績順にスネーク配分して強さを均等にする。
+   */
   finalizeTerm() {
-    const league = AppStorage.getLeague();
+    const league = this._normalize(AppStorage.getLeague());
     const term = this._getCurrentTerm(league);
-    const classes = league.classes || [];
-    if (classes.length < 2) return;
+    const plan = this._promotionPlan(league);
+    if (plan.tiers.length < 2) return;
 
-    // 各境界の入替人数を確定
-    const swaps = [];
-    for (let i = 0; i < classes.length - 1; i++) {
-      const upperStand = this._classStandings(league, term, classes[i].id);
-      const lowerStand = this._classStandings(league, term, classes[i + 1].id);
-      const maxSwap = Math.min(upperStand.length, lowerStand.length);
-      const suggested = this._suggestSwap(upperStand.length, lowerStand.length);
-      const v = this._swapCounts[i] != null ? this._swapCounts[i] : suggested;
-      swaps.push(Math.max(0, Math.min(v, maxSwap)));
+    const badTie = plan.ties.find(t => !t.ok);
+    if (badTie) {
+      alert(`「${badTie.className}」の同点の選手から、${badTie.dir === 'up' ? '昇級' : '降級'}する${badTie.need}名を選んでください。`);
+      return;
     }
-
-    // 検証：各階級から出る合計（昇級out + 降級out）が出場者数を超えないか
-    for (let i = 0; i < classes.length; i++) {
-      const active = this._activeMemberIds(league, classes[i].id).length;
-      const down = i < classes.length - 1 ? swaps[i]     : 0;
-      const up   = i > 0                  ? swaps[i - 1] : 0;
-      if (down + up > active) {
-        alert(`「${classes[i].name}」は出場${active}名に対し昇降級の合計が${down + up}名で多すぎます。\n入替人数を減らしてください。`);
+    for (const g of plan.groups.flat()) {
+      const mv = plan.moves[g.cls.id];
+      const overlap = mv.down.filter(id => mv.up.includes(id));
+      if (mv.down.length + mv.up.length > g.standings.length || overlap.length > 0) {
+        alert(`「${g.cls.name}」は出場${g.standings.length}名に対し昇降級が多すぎます。\n入替人数を減らしてください。`);
         return;
       }
     }
 
-    // 未入力対局があれば警告
-    let pending = 0, total = 0;
-    classes.forEach(c => {
-      (term.matches[c.id] || []).forEach(m => { total++; if (!m.result) pending++; });
-    });
+    let pending = 0;
+    plan.groups.flat().forEach(g => (term.matches[g.cls.id] || []).forEach(m => { if (!m.result) pending++; }));
     let confirmMsg = `第${league.currentTerm}期を確定し、昇降級を適用して第${league.currentTerm + 1}期に進みますか？`;
     if (pending > 0) confirmMsg = `未入力の対局が${pending}局あります。\n` + confirmMsg;
     if (!confirm(confirmMsg)) return;
     AppStorage.createSnapshot(`リーグ戦 第${league.currentTerm}期を確定する前`);
 
-    // 昇降級を計算
-    const changes = [];
-    const newClassOf = {};
-    for (let i = 0; i < classes.length - 1; i++) {
-      const swap = swaps[i];
-      if (swap <= 0) continue;
-      const upper = classes[i], lower = classes[i + 1];
-      const upperStand = this._classStandings(league, term, upper.id);
-      const lowerStand = this._classStandings(league, term, lower.id);
-      upperStand.slice(-swap).forEach(s => {
-        newClassOf[s.id] = lower.id;
-        changes.push({ playerId: s.id, fromClassId: upper.id, toClassId: lower.id, type: 'demote' });
-      });
-      lowerStand.slice(0, swap).forEach(s => {
-        newClassOf[s.id] = upper.id;
-        changes.push({ playerId: s.id, fromClassId: lower.id, toClassId: upper.id, type: 'promote' });
-      });
-    }
+    // 期の記録（あとから過去の期を見られるように、所属と順位を残す）
+    const classById = new Map(league.classes.map(c => [c.id, c]));
+    const rankOf = new Map();
+    plan.groups.flat().forEach(g => g.standings.forEach((s, i) => rankOf.set(s.id, i + 1)));
+    term.memberSnapshot = (league.members || []).filter(m => classById.has(m.classId)).map(m => ({
+      playerId: m.playerId, classId: m.classId, className: classById.get(m.classId).name,
+      tier: classById.get(m.classId).tier, status: m.status, finalRank: rankOf.get(m.playerId) ?? null,
+    }));
+    term.classNames = Object.fromEntries(league.classes.map(c => [c.id, c.name]));
 
-    // 適用
+    // 次の期の級：昇級は1つ上、降級は1つ下、それ以外（休場を含む）は同じ級
+    const targetTier = new Map();
+    const changes = [];
+    plan.groups.flat().forEach(g => {
+      const mv = plan.moves[g.cls.id];
+      mv.up.forEach(id => { targetTier.set(id, g.cls.tier - 1); changes.push({ playerId: id, fromClassId: g.cls.id, fromName: g.cls.name, type: 'promote' }); });
+      mv.down.forEach(id => { targetTier.set(id, g.cls.tier + 1); changes.push({ playerId: id, fromClassId: g.cls.id, fromName: g.cls.name, type: 'demote' }); });
+    });
+    const incomingByTier = {};
+    (league.members || []).filter(m => classById.has(m.classId)).forEach(m => {
+      const tier = targetTier.get(m.playerId) ?? classById.get(m.classId).tier;
+      (incomingByTier[tier] ||= []).push({ playerId: m.playerId, finalRank: m.status === 'active' ? rankOf.get(m.playerId) ?? null : null });
+    });
+    const layout = LeagueLogic.planNextTermLayout(
+      plan.tiers.map(t => ({ tier: t.tier, classIds: t.classes.map(c => c.id), baseName: this._tierName(t) })),
+      incomingByTier, plan.settings.targetSize);
+
+    // 適用：グループ数が減った級は余った階級を削除し、名前を付け直す
+    const newClasses = [];
+    const classOf = new Map();
+    layout.forEach(l => {
+      const oldIds = plan.tiers.find(t => t.tier === l.tier).classes.map(c => c.id);
+      l.groups.forEach((g, gi) => {
+        const id = oldIds[gi] || this._genClassId();
+        newClasses.push({ id, name: l.groups.length === 1 && oldIds.length === 1 ? classById.get(oldIds[0]).name : g.name, tier: l.tier });
+        g.playerIds.forEach(pid => classOf.set(pid, id));
+      });
+    });
+    league.classes = newClasses;
+    (league.members || []).forEach(m => { if (classOf.has(m.playerId)) m.classId = classOf.get(m.playerId); });
+    const newName = new Map(newClasses.map(c => [c.id, c.name]));
+    changes.forEach(c => {
+      const m = (league.members || []).find(mm => mm.playerId === c.playerId);
+      c.toClassId = m?.classId; c.toName = newName.get(m?.classId);
+    });
+
     term.finalized = true;
     term.changes = changes;
-    (league.members || []).forEach(m => {
-      if (newClassOf[m.playerId]) m.classId = newClassOf[m.playerId];
-    });
     league.currentTerm = (league.currentTerm || 1) + 1;
 
     AppStorage.saveLeague(league);
     this._swapCounts = {};
+    this._tieChoices = {};
     this.subView = 'manage';
     this.render();
     UI.showToast(
       `第${term.term}期を確定しました（昇降級${changes.length}件）。第${league.currentTerm}期を開始します。`,
       'success'
     );
+  },
+
+  // ============================================
+  // 過去の期
+  // ============================================
+
+  historyTerm: null,
+
+  setHistoryTerm(term) {
+    this.historyTerm = Number(term);
+    this.render();
+  },
+
+  /**
+   * 確定した期の所属（階級ごとの選手）。記録がない古い期は対局から復元する。
+   * @returns {Array} [{ classId, className, tier, playerIds }]
+   */
+  _termClasses(league, term) {
+    if (term.memberSnapshot) {
+      const out = [];
+      term.memberSnapshot.forEach(s => {
+        let c = out.find(x => x.classId === s.classId);
+        if (!c) { c = { classId: s.classId, className: s.className, tier: s.tier, playerIds: [] }; out.push(c); }
+        if (s.status === 'active') c.playerIds.push(s.playerId);
+      });
+      return out.sort((a, b) => a.tier - b.tier);
+    }
+    const order = (league.classes || []).map(c => c.id);
+    return Object.entries(term.matches || {}).map(([classId, ms]) => {
+      const ids = new Set();
+      (ms || []).forEach(m => { ids.add(m.p1Id); ids.add(m.p2Id); });
+      const cls = (league.classes || []).find(c => c.id === classId);
+      return { classId, className: term.classNames?.[classId] || cls?.name || '（削除された階級）',
+               tier: cls ? cls.tier : 999, order: order.indexOf(classId), playerIds: [...ids] };
+    }).filter(c => c.playerIds.length > 0).sort((a, b) => a.tier - b.tier || a.order - b.order);
+  },
+
+  /** 過去の期の順位（その期の対局から集計） */
+  _historyStandings(term, classId, playerIds) {
+    const stats = {};
+    playerIds.forEach(id => { stats[id] = { id, w: 0, l: 0, d: 0, pts: 0 }; });
+    (term.matches[classId] || []).forEach(m => {
+      if (!stats[m.p1Id] || !stats[m.p2Id]) return;
+      if (m.result === 'p1') { stats[m.p1Id].w++; stats[m.p2Id].l++; }
+      else if (m.result === 'p2') { stats[m.p2Id].w++; stats[m.p1Id].l++; }
+      else if (m.result === 'draw') { stats[m.p1Id].d++; stats[m.p2Id].d++; }
+    });
+    Object.values(stats).forEach(s => { s.pts = s.w * 2 + s.d; });
+    return Object.values(stats).sort((a, b) => b.pts - a.pts || b.w - a.w || a.l - b.l);
+  },
+
+  _renderHistoryView(league) {
+    const finalized = (league.terms || []).filter(t => t.finalized).sort((a, b) => b.term - a.term);
+    if (finalized.length === 0) {
+      return `<div class="card"><p class="league-empty-hint">まだ確定した期はありません。順位表タブで期を確定すると、ここで振り返れます。</p></div>`;
+    }
+    const pmap = this._playerMap();
+    const name = id => this._esc(pmap[id] ? pmap[id].name : '（削除された選手）');
+    const selected = finalized.find(t => t.term === this.historyTerm) || finalized[0];
+    const classes = this._termClasses(league, selected);
+    const changeOf = new Map((selected.changes || []).map(c => [c.playerId, c]));
+
+    const termTables = classes.map(c => {
+      const st = this._historyStandings(selected, c.classId, c.playerIds);
+      return `
+        <div class="card">
+          <h3 class="league-class-heading">${this._esc(c.className)}</h3>
+          <table class="league-standings-table">
+            <thead><tr><th>順位</th><th>選手</th><th>勝</th><th>敗</th><th>分</th><th>Pt</th><th></th></tr></thead>
+            <tbody>${st.map((s, i) => {
+              const ch = changeOf.get(s.id);
+              const mark = ch ? (ch.type === 'promote' ? '<span class="lb-promote">▲ 昇級</span>' : '<span class="lb-demote">▼ 降級</span>') : '';
+              return `<tr><td class="ls-pos">${i + 1}</td><td class="ls-name">${name(s.id)}</td>
+                <td>${s.w}</td><td>${s.l}</td><td>${s.d}</td><td class="ls-pts">${s.pts}</td><td>${mark}</td></tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+
+    // 級の推移：選手ごとに、各期で所属した階級
+    const terms = finalized.slice().reverse();
+    const byPlayer = new Map();
+    terms.forEach(t => this._termClasses(league, t).forEach(c => c.playerIds.forEach(pid => {
+      if (!byPlayer.has(pid)) byPlayer.set(pid, {});
+      byPlayer.get(pid)[t.term] = { name: c.className, tier: c.tier };
+    })));
+    const currentTier = new Map((league.members || []).map(m => [m.playerId, (league.classes || []).find(c => c.id === m.classId)?.tier ?? 999]));
+    const playersSorted = [...byPlayer.keys()].sort((a, b) => (currentTier.get(a) ?? 999) - (currentTier.get(b) ?? 999)
+      || String(pmap[a]?.name || '').localeCompare(String(pmap[b]?.name || ''), 'ja'));
+    const trend = `
+      <div class="card">
+        <h3 class="league-class-heading">級の推移</h3>
+        <div class="league-cross-wrap">
+          <table class="league-history-table">
+            <thead><tr><th>選手</th>${terms.map(t => `<th>第${t.term}期</th>`).join('')}</tr></thead>
+            <tbody>${playersSorted.map(pid => `
+              <tr><th class="ls-name">${name(pid)}</th>${terms.map(t => {
+                const v = byPlayer.get(pid)[t.term];
+                return `<td class="${v ? `league-tier-cell league-tier-${Math.min(v.tier, 6)}` : ''}">${v ? this._esc(v.name) : '—'}</td>`;
+              }).join('')}</tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+    return `
+      <div class="card">
+        <h2 class="card-title"><span class="icon">📜</span> 過去の期</h2>
+        <select class="form-select league-history-select" onchange="League.setHistoryTerm(this.value)">
+          ${finalized.map(t => `<option value="${t.term}" ${t.term === selected.term ? 'selected' : ''}>第${t.term}期</option>`).join('')}
+        </select>
+      </div>
+      ${termTables}
+      ${trend}`;
   },
 };
