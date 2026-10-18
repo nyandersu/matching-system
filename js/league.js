@@ -132,6 +132,9 @@ const League = {
     return `
       <div class="league-header">
         <div class="league-term-badge">第 ${league.currentTerm} 期</div>
+        <input type="text" class="form-input league-term-name" maxlength="20" placeholder="期の名前（例: 6月）"
+               value="${this._esc((league.termNames || {})[league.currentTerm] || '')}"
+               onchange="League.setTermName(this.value)">
         <button class="btn btn-secondary btn-sm" onclick="League.showPdfDialog()">📄 PDF出力</button>
         <button class="btn btn-ghost btn-sm" onclick="League.disable()">
           リーグ戦モードを終了
@@ -141,7 +144,7 @@ const League = {
 
   /** リーグ戦の設定（昇降級の割合・1グループの目標人数） */
   _settings(league) {
-    return { ratio: 0.25, targetSize: 8, ...(league.settings || {}) };
+    return { ratio: 0.25, targetSize: 8, siblingStyle: 'number', ...(league.settings || {}) };
   },
 
   /**
@@ -178,6 +181,27 @@ const League = {
   /** 級の名前（並設グループの添字を除いた名前） */
   _tierName(t) {
     return LeagueLogic.stripSiblingSuffix(t.classes[0].name);
+  },
+
+  /** 級のグループ名の付け方（今の名前から読み取れなければ設定） */
+  _tierStyle(league, t) {
+    return LeagueLogic.siblingStyleOf(t.classes.map(c => c.name)) || this._settings(league).siblingStyle;
+  },
+
+  /** 期の表示名（例：第3期（6月）） */
+  _termLabel(league, term) {
+    const name = (league.termNames || {})[term];
+    return name ? `第${term}期（${name}）` : `第${term}期`;
+  },
+
+  setTermName(name) {
+    const league = AppStorage.getLeague();
+    league.termNames = { ...(league.termNames || {}) };
+    const trimmed = String(name || '').trim().slice(0, 20);
+    if (trimmed) league.termNames[league.currentTerm] = trimmed;
+    else delete league.termNames[league.currentTerm];
+    AppStorage.saveLeague(league);
+    this.render();
   },
 
   /**
@@ -278,6 +302,13 @@ const League = {
             <span>%</span>
           </label>
           <label class="league-setting">
+            <span>グループ名</span>
+            <select class="form-select league-style-select" onchange="League.setSetting('siblingStyle', this.value)">
+              <option value="number" ${settings.siblingStyle === 'number' ? 'selected' : ''}>B1・B2</option>
+              <option value="kanji" ${settings.siblingStyle === 'kanji' ? 'selected' : ''}>B級 甲・B級 乙</option>
+            </select>
+          </label>
+          <label class="league-setting">
             <span>1グループの目標人数</span>
             <input type="number" class="league-swap-input" min="2" max="50"
                    value="${settings.targetSize}"
@@ -298,6 +329,7 @@ const League = {
     const settings = this._settings(league);
     if (key === 'ratio') settings.ratio = Math.max(0, Math.min(0.5, Number(value) || 0));
     if (key === 'targetSize') settings.targetSize = Math.max(2, Math.min(50, parseInt(value) || 8));
+    if (key === 'siblingStyle') settings.siblingStyle = value === 'kanji' ? 'kanji' : 'number';
     league.settings = settings;
     AppStorage.saveLeague(league);
     this._swapCounts = {};
@@ -368,7 +400,7 @@ const League = {
     const members = (league.members || []).filter(m => classIds.includes(m.classId));
     const ordered = this._seedOrder(league, members.map(m => m.playerId));
     const groups = LeagueLogic.distributeSnake(ordered, k);
-    const names = LeagueLogic.defaultSiblingNames(this._tierName(t), k);
+    const names = LeagueLogic.defaultSiblingNames(this._tierName(t), k, this._tierStyle(league, t));
     const ids = groups.map((_, g) => classIds[g] || this._genClassId());
 
     league.classes = league.classes.filter(c => c.tier !== tier || ids.includes(c.id));
@@ -595,7 +627,7 @@ const League = {
 
     let html = `
       <div class="card">
-        <h2 class="card-title"><span class="icon">⚔</span> 第${league.currentTerm}期 対局</h2>
+        <h2 class="card-title"><span class="icon">⚔</span> ${this._esc(this._termLabel(league, league.currentTerm))} 対局</h2>
         <p class="league-section-note">各階級内で総当たり（全員と1局ずつ）を行います。休場者は除外されます。</p>
         <button class="btn btn-primary" onclick="League.generateRoundRobin()">
           ${hasAnyMatches ? '総当たり表を再生成' : '総当たり表を生成'}
@@ -957,7 +989,7 @@ const League = {
 
     let html = `
       <div class="card">
-        <h2 class="card-title"><span class="icon">🏆</span> 第${league.currentTerm}期 順位表</h2>
+        <h2 class="card-title"><span class="icon">🏆</span> ${this._esc(this._termLabel(league, league.currentTerm))} 順位表</h2>
         <p class="league-section-note">勝利2pt・引き分け1pt で集計。</p>
       </div>`;
 
@@ -1007,6 +1039,9 @@ const League = {
 
   /** 同点時のプレーオフ結果（classId:down|up → 移動する選手ID） */
   _tieChoices: {},
+
+  /** 期の確定時に、休場中の選手を次の期は出場に戻すか */
+  _resetAbsent: true,
 
   setSwapCount(boundaryIndex, value) {
     this._swapCounts[boundaryIndex] = Math.max(0, parseInt(value) || 0);
@@ -1130,6 +1165,10 @@ const League = {
           境目が同点のときは、プレーオフの結果で移動する選手を選んでください。
         </p>
         ${rows}
+        <label class="roster-check league-reset-absent">
+          <input type="checkbox" ${this._resetAbsent ? 'checked' : ''} onchange="League._resetAbsent = this.checked">
+          休場中の選手は、次の期から出場に戻す
+        </label>
         <button class="btn btn-primary league-finalize-btn" onclick="League.finalizeTerm()">
           第${league.currentTerm}期を確定して次の期へ
         </button>
@@ -1192,7 +1231,7 @@ const League = {
       (incomingByTier[tier] ||= []).push({ playerId: m.playerId, finalRank: m.status === 'active' ? rankOf.get(m.playerId) ?? null : null });
     });
     const layout = LeagueLogic.planNextTermLayout(
-      plan.tiers.map(t => ({ tier: t.tier, classIds: t.classes.map(c => c.id), baseName: this._tierName(t) })),
+      plan.tiers.map(t => ({ tier: t.tier, classIds: t.classes.map(c => c.id), baseName: this._tierName(t), style: this._tierStyle(league, t) })),
       incomingByTier, plan.settings.targetSize);
 
     // 適用：グループ数が減った級は余った階級を削除し、名前を付け直す
@@ -1207,7 +1246,10 @@ const League = {
       });
     });
     league.classes = newClasses;
-    (league.members || []).forEach(m => { if (classOf.has(m.playerId)) m.classId = classOf.get(m.playerId); });
+    (league.members || []).forEach(m => {
+      if (classOf.has(m.playerId)) m.classId = classOf.get(m.playerId);
+      if (this._resetAbsent && m.status === 'absent') m.status = 'active';
+    });
     const newName = new Map(newClasses.map(c => [c.id, c.name]));
     changes.forEach(c => {
       const m = (league.members || []).find(mm => mm.playerId === c.playerId);
@@ -1288,7 +1330,7 @@ const League = {
     const kind = document.getElementById('league-pdf-kind').value;
     const target = document.getElementById('league-pdf-target').value;
     const orientation = document.getElementById('league-pdf-orientation').value;
-    const termLabel = `第${league.currentTerm}期`;
+    const termLabel = this._termLabel(league, league.currentTerm);
     const classes = this._tiers(league).flatMap(t => t.classes).filter(c => !target || c.id === target);
 
     if (kind === 'report') {
@@ -1446,7 +1488,7 @@ const League = {
         <h3 class="league-class-heading">級の推移</h3>
         <div class="league-cross-wrap">
           <table class="league-history-table">
-            <thead><tr><th>選手</th>${terms.map(t => `<th>第${t.term}期</th>`).join('')}</tr></thead>
+            <thead><tr><th>選手</th>${terms.map(t => `<th>${this._esc(this._termLabel(league, t.term))}</th>`).join('')}</tr></thead>
             <tbody>${playersSorted.map(pid => `
               <tr><th class="ls-name">${name(pid)}</th>${terms.map(t => {
                 const v = byPlayer.get(pid)[t.term];
@@ -1461,7 +1503,7 @@ const League = {
       <div class="card">
         <h2 class="card-title"><span class="icon">📜</span> 過去の期</h2>
         <select class="form-select league-history-select" onchange="League.setHistoryTerm(this.value)">
-          ${finalized.map(t => `<option value="${t.term}" ${t.term === selected.term ? 'selected' : ''}>第${t.term}期</option>`).join('')}
+          ${finalized.map(t => `<option value="${t.term}" ${t.term === selected.term ? 'selected' : ''}>${this._esc(this._termLabel(league, t.term))}</option>`).join('')}
         </select>
       </div>
       ${termTables}

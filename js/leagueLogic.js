@@ -60,18 +60,38 @@ const LeagueLogic = {
     return groups;
   },
 
-  /** 末尾の「 甲」「 乙」…（または数字）を取り除く */
+  /**
+   * 並設グループの添字を取り除いた級の名前。
+   * 「B級 甲」「B級 2」→「B級」、「B1」「B2」→「B」（数字の直前が空白でなくても外す。ただし名前が空になる場合は外さない）
+   */
   stripSiblingSuffix(name) {
-    const m = String(name).match(/^(.*?)\s+([甲乙丙丁戊己庚辛壬癸]|\d+)$/);
-    return m ? m[1] : String(name);
+    const str = String(name);
+    const spaced = str.match(/^(.*?)\s+([甲乙丙丁戊己庚辛壬癸]|\d+)$/);
+    if (spaced) return spaced[1];
+    const digits = str.match(/^(.*?\D)\d+$/);
+    return digits && digits[1].trim() ? digits[1] : str;
   },
 
-  /** 並設グループの既定名。1つなら元の名前、複数なら「B級 甲 / B級 乙 …」 */
-  defaultSiblingNames(baseName, k) {
+  /**
+   * 既存のグループ名から名前の付け方を読み取る。
+   * 「B1・B2」のように数字で付けていれば 'number'、「B級 甲・B級 乙」なら 'kanji'、判断できなければ null
+   */
+  siblingStyleOf(names) {
+    if (names.length >= 2 && names.every(n => /\s[甲乙丙丁戊己庚辛壬癸]$/.test(n))) return 'kanji';
+    if (names.length >= 2 && names.every(n => /\d$/.test(n))) return 'number';
+    return null;
+  },
+
+  /**
+   * 並設グループの既定名。1つなら元の名前。
+   * 複数なら style='number' で「B1・B2…」、style='kanji' で「B級 甲・B級 乙…」
+   */
+  defaultSiblingNames(baseName, k, style = 'kanji') {
     const stripped = this.stripSiblingSuffix(baseName);
     if (k <= 1) return [stripped];
-    return Array.from({ length: k }, (_, i) =>
-      `${stripped} ${i < this.SIBLING_SUFFIX.length ? this.SIBLING_SUFFIX[i] : String(i + 1)}`);
+    return Array.from({ length: k }, (_, i) => style === 'number'
+      ? `${stripped}${i + 1}`
+      : `${stripped} ${i < this.SIBLING_SUFFIX.length ? this.SIBLING_SUFFIX[i] : String(i + 1)}`);
   },
 
   /**
@@ -113,7 +133,7 @@ const LeagueLogic = {
 
   /**
    * 次の期の構成（並設グループ込み）。
-   * @param {Array} tiers [{ tier, classIds:[...], baseName }]（上から順）
+   * @param {Array} tiers [{ tier, classIds:[...], baseName, style }]（上から順。style はグループ名の付け方）
    * @param {Object} incomingByTier tier → [{ playerId, finalRank }]（finalRank が小さいほど上位、null は最後）
    * @param {number} targetSize 1グループの目標人数
    * @returns {Array} [{ tier, groups: [{ name, playerIds }] }]
@@ -123,7 +143,7 @@ const LeagueLogic = {
       const incoming = (incomingByTier[t.tier] || []).slice().sort((a, b) =>
         (a.finalRank ?? Infinity) - (b.finalRank ?? Infinity) || String(a.playerId).localeCompare(String(b.playerId)));
       const groupCount = this.nextGroupCount(t.classIds.length, incoming.length, targetSize);
-      const names = this.defaultSiblingNames(t.baseName, groupCount);
+      const names = this.defaultSiblingNames(t.baseName, groupCount, t.style);
       const groups = this.distributeSnake(incoming.map(m => m.playerId), groupCount);
       return { tier: t.tier, groups: groups.map((ids, g) => ({ name: names[g], playerIds: ids })) };
     });
