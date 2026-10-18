@@ -337,6 +337,14 @@ const AppStorage = {
     return data || [];
   },
 
+  /** 名簿の選手の、部にひも付いた全部屋の対局（古い順） */
+  async getPlayerCareer(clubPlayerId) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const { data, error } = await supabaseClient.rpc('club_player_career', { p_club_player_id: clubPlayerId });
+    if (error) throw new Error('通算成績の取得に失敗しました');
+    return data || [];
+  },
+
   /** 開いている部屋の部（ひも付いていなければ null） */
   getRoomClub() {
     return this.loadAll().club || null;
