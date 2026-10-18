@@ -3094,3 +3094,48 @@ body::before {
 .rating-update-k .weight-segment { flex: 1; min-width: 240px; }
 .rating-update-card .btn-group { margin-top: 14px; }
 #strength-mode-bar .btn-edit-mode { margin-left: auto; }
+
+/* --- 部と名簿 --- */
+.club-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.club-code-input { flex: 1; min-width: 140px; text-transform: uppercase; }
+.room-club-select-group { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.room-club-display {
+  font-size: 12px;
+  color: var(--amber-light);
+  cursor: pointer;
+  padding: 2px 8px;
+  border: 1px solid rgba(230, 168, 23, 0.4);
+  border-radius: 10px;
+}
+.room-club-display:hover { background: var(--amber-glow); }
+.roster-card { max-width: 680px; }
+.roster-form {
+  display: grid;
+  grid-template-columns: 1fr 80px 64px 110px auto auto;
+  gap: 6px;
+  margin: 12px 0 8px;
+}
+@media (max-width: 600px) {
+  .roster-form { grid-template-columns: 1fr 1fr; }
+  .roster-form #roster-name { grid-column: 1 / -1; }
+}
+.roster-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.roster-check { font-size: 13px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.roster-actions { white-space: nowrap; }
+.roster-actions .btn { padding: 2px 8px; font-size: 12px; }
+.roster-history-row td { text-align: left; background: var(--bg-secondary); }
+.rating-history-list { margin: 0; padding-left: 18px; font-size: 12px; color: var(--text-secondary); line-height: 1.8; }
+.roster-pick-item { cursor: pointer; }
+.room-history-link { font-size: 12px; }

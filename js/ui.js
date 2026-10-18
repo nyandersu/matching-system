@@ -177,16 +177,19 @@ const UI = {
     const overlay = document.getElementById('room-selector-overlay');
     overlay.classList.remove('hidden');
 
-    // 自分が作成した部屋（サーバー）と最近参加した部屋（この端末）を表示
-    this._renderRoomLists();
+    // 部の一覧 → 自分が作成した部屋（サーバー）と最近参加した部屋（この端末）を表示
+    this._renderClubs().then(() => this._renderRoomLists());
+    this._bindClubEvents();
 
-    // 新規作成ボタン（作成した部屋はアカウントに紐づけて保存）
+    // 新規作成ボタン（作成した部屋はアカウントに紐づけて保存。部を選んでいればその部にひも付け）
     const createBtn = document.getElementById('room-create-btn');
     createBtn.addEventListener('click', async () => {
       const newId = AppStorage.generateRoomId();
+      const clubId = document.getElementById('room-club-select').value || null;
+      try { localStorage.setItem('shogi_last_club', clubId || ''); } catch {}
       createBtn.disabled = true;
       try {
-        await AppStorage.registerOwnedRoom(newId);
+        await AppStorage.registerOwnedRoom(newId, clubId);
       } catch (err) {
         console.warn(err);
         alert(`部屋をアカウントに登録できませんでした。\n部屋コード「${newId}」を控えておいてください。`);
@@ -220,20 +223,24 @@ const UI = {
       const list    = document.getElementById(listId);
       if (!section || !list) return;
       section.classList.toggle('hidden', items.length === 0);
-      list.innerHTML = items.map(({ roomId, meta }) => `
+      list.innerHTML = items.map(({ roomId, meta, linkable }) => `
         <div class="room-history-item">
           <button class="room-history-enter" data-room="${this.escapeHtml(roomId)}">
             <span class="room-history-code">${this.escapeHtml(roomId)}</span>
             ${meta ? `<span class="room-history-meta">${this.escapeHtml(meta)}</span>` : ''}
             <span class="room-history-arrow">→</span>
           </button>
+          ${linkable ? `<button class="room-history-delete room-history-link" data-room="${this.escapeHtml(roomId)}" title="部にひも付ける">🔗</button>` : ''}
           <button class="room-history-delete" data-room="${this.escapeHtml(roomId)}" title="${deleteTitle}">✕</button>
         </div>
       `).join('');
+      list.querySelectorAll('.room-history-link').forEach(btn => {
+        btn.addEventListener('click', () => this._showClubLink(btn.dataset.room));
+      });
       list.querySelectorAll('.room-history-enter').forEach(btn => {
         btn.addEventListener('click', () => this._enterRoom(btn.dataset.room));
       });
-      list.querySelectorAll('.room-history-delete').forEach(btn => {
+      list.querySelectorAll('.room-history-delete:not(.room-history-link)').forEach(btn => {
         btn.addEventListener('click', () => onDelete(btn.dataset.room));
       });
     };
@@ -249,7 +256,8 @@ const UI = {
         const date = new Date(r.createdAt);
         const parts = [`${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}作成`, `${r.playerCount}人`];
         if (r.roundCount > 0) parts.push(`${r.roundCount}回戦`);
-        return { roomId: r.roomId, meta: parts.join('・') };
+        if (r.clubName) parts.unshift(r.clubName);
+        return { roomId: r.roomId, meta: parts.join('・'), linkable: !r.clubId && (this._clubs || []).length > 0 };
       }),
       'この部屋を削除', roomId => this._deleteRoom(roomId));
 
@@ -264,6 +272,327 @@ const UI = {
         AppStorage.removeFromRoomHistory(roomId);
         this._renderRoomLists();
       });
+  },
+
+  // ============================================
+  // 部と名簿（部屋選択画面）
+  // ============================================
+
+  async _renderClubs() {
+    const list = document.getElementById('club-list');
+    try {
+      this._clubs = await AppStorage.listClubs();
+    } catch (err) {
+      console.warn(err);
+      this._clubs = [];
+    }
+    list.innerHTML = this._clubs.length === 0
+      ? '<p class="history-empty">部を作ると、選手とレーティングを部屋をまたいで引き継げます</p>'
+      : this._clubs.map((c, i) => `
+        <div class="room-history-item">
+          <button class="room-history-enter" onclick="UI.showRoster(${i})">
+            <span class="room-history-code">${this.escapeHtml(c.name)}</span>
+            <span class="room-history-meta">部コード ${this.escapeHtml(c.clubId)}・名簿${c.playerCount}人・部屋${c.roomCount}</span>
+            <span class="room-history-arrow">名簿 →</span>
+          </button>
+        </div>`).join('');
+
+    // 新しい部屋の部の選択肢（前回選んだ部を初期値に）
+    const group  = document.getElementById('room-club-select-group');
+    const select = document.getElementById('room-club-select');
+    group.classList.toggle('hidden', this._clubs.length === 0);
+    let last = null;
+    try { last = localStorage.getItem('shogi_last_club'); } catch {}
+    // 前回「部なし」を選んだ（空文字）ならそのまま。未選択・存在しない部なら先頭の部
+    const initial = last === '' ? '' : (this._clubs.some(c => c.clubId === last) ? last : (this._clubs[0]?.clubId || ''));
+    select.innerHTML = this._clubs.map(c => `<option value="${this.escapeHtml(c.clubId)}">${this.escapeHtml(c.name)}</option>`).join('')
+      + '<option value="">部なし（名簿を使わない）</option>';
+    select.value = initial;
+  },
+
+  _bindClubEvents() {
+    document.getElementById('club-create-btn').addEventListener('click', async () => {
+      const name = (prompt('部の名前を入力してください（例: 〇〇高校将棋部）') || '').trim();
+      if (!name) return;
+      try {
+        const code = await AppStorage.createClub(name.slice(0, 50));
+        try { localStorage.setItem('shogi_last_club', code); } catch {}
+        alert(`「${name}」を作成しました。\n\n部コード: ${code}\n他の部員がこのコードで参加すると、同じ名簿を使えます。`);
+        await this._renderClubs();
+        this._renderRoomLists();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+    const join = async () => {
+      const input = document.getElementById('club-code-input');
+      const code = input.value.trim().toUpperCase();
+      if (code.length < 4) return;
+      try {
+        const club = await AppStorage.joinClub(code);
+        input.value = '';
+        this.showToast(`「${club.name}」に参加しました`, 'success');
+        await this._renderClubs();
+        this._renderRoomLists();
+      } catch (err) {
+        alert(err.message);
+      }
+    };
+    document.getElementById('club-join-btn').addEventListener('click', join);
+    document.getElementById('club-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
+    document.getElementById('club-code-input').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
+  },
+
+  /** 部の名簿（追加・編集・引退・レーティング履歴・進級） */
+  async showRoster(clubOrIndex) {
+    const club = typeof clubOrIndex === 'number' ? (this._clubs || [])[clubOrIndex] : clubOrIndex;
+    if (!club) return;
+    this._rosterClub = club;
+    const modal = document.getElementById('roster-modal');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      const close = () => {
+        modal.classList.add('hidden');
+        // 部屋選択画面なら人数の表示を更新、部屋の中なら名簿の変更を取り込む
+        if (!document.getElementById('room-selector-overlay').classList.contains('hidden')) this._renderClubs();
+        else if (AppStorage.roomId) AppStorage._scheduleRefetch();
+      };
+      document.getElementById('roster-close').addEventListener('click', close);
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      document.getElementById('roster-form').addEventListener('submit', e => { e.preventDefault(); this._saveRosterForm(); });
+      document.getElementById('roster-cancel').addEventListener('click', () => this._resetRosterForm());
+      document.getElementById('roster-show-retired').addEventListener('change', () => this._renderRosterTable());
+      document.getElementById('roster-promote-btn').addEventListener('click', () => this._promoteRosterGrades());
+    }
+    document.getElementById('roster-title').textContent = `${club.name} の名簿`;
+    document.getElementById('roster-note').textContent =
+      `部コード ${club.clubId}（他の部員がこのコードで参加すると同じ名簿を使えます）。名簿の変更は、この部にひも付いた部屋に反映されます。`;
+    this._resetRosterForm();
+    modal.classList.remove('hidden');
+    await this._loadRoster();
+  },
+
+  async _loadRoster() {
+    const table = document.getElementById('roster-table');
+    table.innerHTML = '<tbody><tr><td>読み込み中...</td></tr></tbody>';
+    try {
+      this._roster = await AppStorage.listRoster(this._rosterClub.clubId);
+    } catch (err) {
+      table.innerHTML = `<tbody><tr><td>${this.escapeHtml(err.message)}</td></tr></tbody>`;
+      return;
+    }
+    this._renderRosterTable();
+  },
+
+  _renderRosterTable() {
+    const showRetired = document.getElementById('roster-show-retired').checked;
+    const rows = (this._roster || []).filter(p => showRetired || !p.retired);
+    const table = document.getElementById('roster-table');
+    if (rows.length === 0) {
+      table.innerHTML = '<tbody><tr><td class="opp-muted">名簿に選手がいません。上の欄から追加してください。</td></tr></tbody>';
+      return;
+    }
+    table.innerHTML = `
+      <thead><tr><th>名前</th><th>学年</th><th>ランク</th><th>レート</th><th></th></tr></thead>
+      <tbody>${rows.map(p => `
+        <tr class="${p.retired ? 'player-withdrawn' : ''}">
+          <td class="opp-name">${this.escapeHtml(p.name)}${p.retired ? ' <span class="withdrawn-badge">引退</span>' : ''}</td>
+          <td>${p.grade ?? '—'}${p.grade ? '年' : ''}</td>
+          <td>${p.rank ? `<span class="rank-badge rank-${p.rank}">${p.rank}</span>` : '—'}</td>
+          <td>${this.escapeHtml(this.formatRating(p.rating))}</td>
+          <td class="roster-actions">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="UI._editRosterPlayer('${p.id}')">編集</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="UI._toggleRatingHistory('${p.id}')">履歴</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="UI._toggleRetired('${p.id}')">${p.retired ? '復帰' : '引退'}</button>
+          </td>
+        </tr>
+        <tr class="roster-history-row hidden" id="roster-history-${p.id}"><td colspan="5"></td></tr>`).join('')}
+      </tbody>`;
+  },
+
+  _resetRosterForm() {
+    document.getElementById('roster-form').reset();
+    document.getElementById('roster-edit-id').value = '';
+    document.getElementById('roster-rank').value = 'C';
+    document.getElementById('roster-submit').textContent = '追加';
+    document.getElementById('roster-cancel').classList.add('hidden');
+  },
+
+  _editRosterPlayer(id) {
+    const p = (this._roster || []).find(x => x.id === id);
+    if (!p) return;
+    document.getElementById('roster-edit-id').value = p.id;
+    document.getElementById('roster-name').value = p.name;
+    document.getElementById('roster-grade').value = p.grade ?? 1;
+    document.getElementById('roster-rank').value = p.rank || 'C';
+    document.getElementById('roster-rating').value = Matching.hasNoRating(p) ? '' : p.rating;
+    document.getElementById('roster-submit').textContent = '更新';
+    document.getElementById('roster-cancel').classList.remove('hidden');
+    document.getElementById('roster-name').focus();
+  },
+
+  async _saveRosterForm() {
+    const id     = document.getElementById('roster-edit-id').value || null;
+    const name   = document.getElementById('roster-name').value.trim();
+    const raw    = document.getElementById('roster-rating').value.trim();
+    const rating = raw === '' ? null : Number(raw);
+    if (!name) return;
+    if (rating !== null && !Number.isFinite(rating)) {
+      this.showToast('レーティングを数値で入力してください', 'error');
+      return;
+    }
+    const current = id ? (this._roster || []).find(x => x.id === id) : null;
+    try {
+      await AppStorage.saveRosterPlayer(this._rosterClub.clubId, {
+        id, name, rating,
+        grade: parseInt(document.getElementById('roster-grade').value),
+        rank: document.getElementById('roster-rank').value,
+        retired: current ? current.retired : false,
+      });
+      this.showToast(id ? `${name} を更新しました` : `${name} を名簿に追加しました`, 'success');
+      this._resetRosterForm();
+      await this._loadRoster();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  },
+
+  async _toggleRetired(id) {
+    const p = (this._roster || []).find(x => x.id === id);
+    if (!p) return;
+    const msg = p.retired
+      ? `${p.name} を名簿に戻しますか？`
+      : `${p.name} を引退にしますか？\n（名簿の一覧と「名簿から追加」に出なくなります。成績とレーティングの履歴は残ります）`;
+    if (!confirm(msg)) return;
+    try {
+      await AppStorage.saveRosterPlayer(this._rosterClub.clubId, { ...p, retired: !p.retired });
+      await this._loadRoster();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  },
+
+  async _promoteRosterGrades() {
+    const targets = (this._roster || []).filter(p => !p.retired && p.grade);
+    if (targets.length === 0) return;
+    if (!confirm(`引退していない${targets.length}人の学年を1つずつ上げますか？（新年度の進級用。8年が上限です）`)) return;
+    try {
+      for (const p of targets) {
+        await AppStorage.saveRosterPlayer(this._rosterClub.clubId, { ...p, grade: Math.min(8, p.grade + 1) });
+      }
+      this.showToast(`${targets.length}人の学年を上げました`, 'success');
+      await this._loadRoster();
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  },
+
+  async _toggleRatingHistory(id) {
+    const row = document.getElementById(`roster-history-${id}`);
+    if (!row) return;
+    if (!row.classList.contains('hidden')) { row.classList.add('hidden'); return; }
+    row.classList.remove('hidden');
+    const cell = row.querySelector('td');
+    cell.textContent = '読み込み中...';
+    try {
+      cell.innerHTML = this._ratingHistoryHtml(await AppStorage.listRatingHistory(id));
+    } catch (err) {
+      cell.textContent = err.message;
+    }
+  },
+
+  /** レーティング履歴（日付・部屋・回戦・変化） */
+  _ratingHistoryHtml(history) {
+    if (history.length === 0) return '<span class="opp-muted">まだレーティングの更新はありません</span>';
+    return `<ul class="rating-history-list">${history.map(h => {
+      const d = new Date(h.created_at);
+      const before = Number(h.before), after = Number(h.after);
+      const delta = Math.round(after - before);
+      const sign = delta > 0 ? `+${delta}` : delta < 0 ? `−${-delta}` : '±0';
+      return `<li>${d.getMonth() + 1}/${d.getDate()}　部屋 ${this.escapeHtml(h.room_id || '')} 第${this.escapeHtml((h.rounds || []).join('・'))}回戦　`
+        + `${this.escapeHtml(this.formatRating(before))} → <strong>${this.escapeHtml(this.formatRating(after))}</strong>`
+        + ` <span class="${delta > 0 ? 'opp-diff-up' : delta < 0 ? 'opp-diff-down' : ''}">(${sign})</span></li>`;
+    }).join('')}</ul>`;
+  },
+
+  /** 名簿から部屋に選手を追加 */
+  async showRosterPick() {
+    const club = AppStorage.getRoomClub();
+    if (!club) return;
+    const modal = document.getElementById('roster-pick-modal');
+    const close = () => modal.classList.add('hidden');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      document.getElementById('roster-pick-close').addEventListener('click', close);
+      document.getElementById('roster-pick-cancel').addEventListener('click', close);
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      document.getElementById('roster-pick-all').addEventListener('change', e => {
+        modal.querySelectorAll('.roster-pick-item input').forEach(cb => { cb.checked = e.target.checked; });
+      });
+      document.getElementById('roster-pick-apply').addEventListener('click', () => {
+        const ids = [...modal.querySelectorAll('.roster-pick-item input:checked')].map(cb => cb.value);
+        const picked = (this._rosterPickCandidates || []).filter(p => ids.includes(p.id));
+        if (picked.length === 0) { close(); return; }
+        const added = AppStorage.addPlayersFromRoster(picked);
+        close();
+        this.renderAll();
+        this.showToast(`名簿から${added.length}人を追加しました`, 'success');
+      });
+    }
+    const list = document.getElementById('roster-pick-list');
+    document.getElementById('roster-pick-all').checked = false;
+    list.innerHTML = '<p class="history-empty">読み込み中...</p>';
+    modal.classList.remove('hidden');
+
+    let roster;
+    try {
+      roster = await AppStorage.listRoster(club.clubId);
+    } catch (err) {
+      list.innerHTML = `<p class="history-empty">${this.escapeHtml(err.message)}</p>`;
+      return;
+    }
+    const inRoom = new Set(AppStorage.getPlayers().map(p => p.clubPlayerId).filter(Boolean));
+    this._rosterPickCandidates = roster.filter(p => !p.retired && !inRoom.has(p.id));
+    list.innerHTML = this._rosterPickCandidates.length === 0
+      ? '<p class="history-empty">追加できる選手はいません（名簿の全員がこの部屋に入っています）</p>'
+      : this._rosterPickCandidates.map(p => `
+        <label class="history-item roster-pick-item">
+          <span class="history-info">
+            <span class="history-label"><input type="checkbox" value="${this.escapeHtml(p.id)}"> ${this.escapeHtml(p.name)}</span>
+            <span class="history-meta">${p.grade ? `${p.grade}年` : ''}${p.rank ? `・${p.rank}` : ''}${Matching.hasNoRating(p) ? '' : `・レート ${this.escapeHtml(this.formatRating(p.rating))}`}</span>
+          </span>
+        </label>`).join('');
+  },
+
+  /** 部屋を部にひも付けるダイアログ */
+  _showClubLink(roomId) {
+    const modal = document.getElementById('club-link-modal');
+    const close = () => modal.classList.add('hidden');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      document.getElementById('club-link-close').addEventListener('click', close);
+      document.getElementById('club-link-cancel').addEventListener('click', close);
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      document.getElementById('club-link-apply').addEventListener('click', async () => {
+        const target = modal.dataset.room;
+        const clubId = document.getElementById('club-link-select').value;
+        try {
+          const created = await AppStorage.linkRoomToClub(target, clubId);
+          close();
+          this.showToast(`部屋 ${target} を部にひも付けました（名簿に${created}人を追加）`, 'success');
+          await this._renderClubs();
+          this._renderRoomLists();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    }
+    modal.dataset.room = roomId;
+    document.getElementById('club-link-note').textContent =
+      `部屋 ${roomId} の選手を部の名簿にひも付けます。名簿に同じ名前の選手がいればその選手に、いなければ名簿に追加します。`;
+    document.getElementById('club-link-select').innerHTML = (this._clubs || [])
+      .map(c => `<option value="${this.escapeHtml(c.clubId)}">${this.escapeHtml(c.name)}</option>`).join('');
+    modal.classList.remove('hidden');
   },
 
   /** 自分が作成した部屋を削除（確認あり） */
@@ -307,6 +636,11 @@ const UI = {
       bar.classList.remove('hidden');
 
       document.getElementById('history-btn').addEventListener('click', () => this.showHistory());
+      document.getElementById('room-club-display').addEventListener('click', () => {
+        const club = AppStorage.getRoomClub();
+        if (club) this.showRoster(club);
+      });
+      document.getElementById('add-from-roster-btn').addEventListener('click', () => this.showRosterPick());
 
       document.getElementById('change-room-btn').addEventListener('click', () => {
         const url = new URL(window.location.href);
@@ -401,6 +735,16 @@ const UI = {
     }
     document.getElementById('mean-balance-group')?.classList.toggle('hidden', !ratingMode);
     document.getElementById('rating-update-btn')?.classList.toggle('hidden', !ratingMode);
+
+    // 部にひも付いた部屋：ヘッダーに部の名前、選手管理に「名簿から追加」
+    const club = AppStorage.getRoomClub();
+    const clubEl = document.getElementById('room-club-display');
+    if (clubEl) {
+      clubEl.classList.toggle('hidden', !club);
+      clubEl.textContent = club ? `部: ${club.name}` : '';
+      clubEl.title = club ? '名簿を開く' : '';
+    }
+    document.getElementById('add-from-roster-btn')?.classList.toggle('hidden', !club);
     document.getElementById('fill-initial-ratings-btn')?.classList.toggle('hidden', !ratingMode);
     document.querySelectorAll('.display-chip[data-key="rank"]').forEach(chip => {
       chip.textContent = ratingMode ? 'レーティング' : 'ランク';
@@ -1866,6 +2210,14 @@ const UI = {
     const totalGames = (stat.wins || 0) + (stat.losses || 0) + (stat.draws || 0);
     const winPct = totalGames > 0 ? ((stat.wins || 0) / totalGames * 100).toFixed(0) : 0;
 
+    // 名簿にひも付いた選手は、部屋をまたいだレーティング履歴を後から読み込む
+    if (player.clubPlayerId) {
+      AppStorage.listRatingHistory(player.clubPlayerId).then(history => {
+        const el = document.getElementById('pd-rating-history');
+        if (el) el.innerHTML = this._ratingHistoryHtml(history);
+      }).catch(() => {});
+    }
+
     document.getElementById('player-detail-content').innerHTML = `
       <div class="pd-header">
         ${ratingMode
@@ -1895,6 +2247,12 @@ const UI = {
       <div class="pd-section">
         <h3 class="pd-section-title">ランク別戦績</h3>
         <div class="pd-rank-stats">${rankRowHtml}</div>
+      </div>` : ''}
+
+      ${player.clubPlayerId ? `
+      <div class="pd-section">
+        <h3 class="pd-section-title">レーティングの推移（部の名簿）</h3>
+        <div id="pd-rating-history" class="opp-muted">読み込み中...</div>
       </div>` : ''}
 
       <div class="pd-section">
