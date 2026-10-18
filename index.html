@@ -201,6 +201,8 @@
       <span class="display-opts-label">強さの入力</span>
       <button type="button" class="sort-chip" data-mode="rank">ランク（S〜Cの4段階）</button>
       <button type="button" class="sort-chip" data-mode="rating">レーティング（数値）</button>
+      <button type="button" class="btn-edit-mode hidden" id="fill-initial-ratings-btn"
+        title="レーティング未入力の選手に、ランクから初期値を入れる">ランクから初期値を入れる</button>
     </div>
     <div class="card">
       <h2 class="card-title" id="form-title">
@@ -383,6 +385,7 @@
       <div class="standings-header-actions">
         <button class="btn btn-ghost btn-sm" id="pt-info-btn" title="Pt・ソルコフの算出方法">算出方法 ℹ</button>
         <button class="btn btn-ghost btn-sm toggle-active" id="toggle-pt-btn">Pt 表示中</button>
+        <button class="btn btn-secondary hidden" id="rating-update-btn">📈 レーティング更新</button>
         <button class="btn btn-secondary" id="export-standings-btn">
           📄 成績表PDF出力
         </button>
@@ -461,6 +464,31 @@
       <tr><td>ソルコフ−敗数</td><td>ソルコフから自分の敗数を引いた値</td></tr>
     </table>
     <p class="pt-info-note">順位は1局以上対局した選手の中での順位で、同じ値は同順位です。表の最下行は平均と標準偏差（σ、母標準偏差）です。順位表の並びには使いません。</p>
+  </div>
+</div>
+
+<!-- レーティング更新 -->
+<div id="rating-update-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card rating-update-card">
+    <button class="modal-close" id="rating-update-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">レーティング更新</h3>
+    <p class="pt-info-note" id="rating-update-summary"></p>
+    <div class="rating-update-k">
+      <span class="display-opts-label">変化の大きさ（K）</span>
+      <div class="weight-segment" id="rating-k-segment">
+        <button type="button" class="wseg-btn" data-value="16">小（16）</button>
+        <button type="button" class="wseg-btn wseg-active" data-value="32">標準（32）</button>
+        <button type="button" class="wseg-btn" data-value="48">大（48）</button>
+      </div>
+    </div>
+    <div class="opp-strength-table-wrapper">
+      <table class="opp-strength-table" id="rating-update-table"></table>
+    </div>
+    <p class="pt-info-note">変化量 ＝ K ×（実際の勝数 − 期待勝数）。期待勝数はレーティング差から計算します（200点差で強いほうの勝率が約76%）。引き分けは0.5勝、不戦勝は含めません。</p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="rating-update-apply">反映する</button>
+      <button class="btn btn-secondary" id="rating-update-cancel">キャンセル</button>
+    </div>
   </div>
 </div>
 

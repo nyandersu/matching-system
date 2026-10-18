@@ -1063,6 +1063,60 @@ const Matching = {
     return sorted;
   },
 
+  // ランクから入れるレーティングの初期値（1段階200点差 ≒ 強いほうの期待勝率76%）
+  INITIAL_RATING_BY_RANK: { S: 1800, A: 1600, B: 1400, C: 1200 },
+
+  /** レーティング差から期待勝率（イロレーティングの式。400点差で約91%） */
+  expectedScore(rating, opponentRating, scale = 400) {
+    return 1 / (1 + Math.pow(10, (opponentRating - rating) / scale));
+  },
+
+  /**
+   * 対局結果からのレーティング更新（イロレーティング方式）。
+   * - 対象：確定済みで、まだ反映していない回戦（rated でない）の、結果が入力された対局
+   * - 変化量 = K × (実際の勝数 − 期待勝数)。期待勝数は反映前のレーティングで計算する
+   *   （回戦の順に逐次更新しないので、対局の順番で結果が変わらない）
+   * - 勝ち=1、引き分け=0.5、負け=0。不戦勝は相手がいないので含めない
+   * @returns {{ rows: Array, roundNumbers: number[], error?: string }}
+   */
+  computeRatingUpdate(players, rounds, { k = 32, scale = 400 } = {}) {
+    const targetRounds = rounds.filter(r => r.confirmed && !r.rated);
+    const byId = Object.fromEntries(players.map(p => [p.id, p]));
+    const stat = {};
+    const ensure = id => (stat[id] ??= { games: 0, expected: 0, actual: 0 });
+
+    const missing = new Set();
+    targetRounds.forEach(r => r.matches.forEach(m => {
+      if (!m.result) return;
+      const p1 = byId[m.player1Id], p2 = byId[m.player2Id];
+      if (!p1 || !p2) return;
+      if (this.hasNoRating(p1)) missing.add(p1.name);
+      if (this.hasNoRating(p2)) missing.add(p2.name);
+    }));
+    if (missing.size > 0) {
+      return { rows: [], roundNumbers: [], error: `レーティングが未入力の選手がいます: ${[...missing].slice(0, 5).join('、')}` };
+    }
+
+    targetRounds.forEach(r => r.matches.forEach(m => {
+      if (!m.result) return;
+      const p1 = byId[m.player1Id], p2 = byId[m.player2Id];
+      if (!p1 || !p2) return;
+      const r1 = Number(p1.rating), r2 = Number(p2.rating);
+      const s1 = m.result === 'player1' ? 1 : m.result === 'player2' ? 0 : 0.5;
+      const a = ensure(p1.id), b = ensure(p2.id);
+      a.games++; a.expected += this.expectedScore(r1, r2, scale); a.actual += s1;
+      b.games++; b.expected += this.expectedScore(r2, r1, scale); b.actual += 1 - s1;
+    }));
+
+    const rows = Object.entries(stat).map(([id, st]) => {
+      const before = Number(byId[id].rating);
+      const delta  = Math.round(k * (st.actual - st.expected));
+      return { id, name: byId[id].name, before, games: st.games, expected: st.expected, actual: st.actual, delta, after: before + delta };
+    }).sort((x, y) => y.delta - x.delta || y.after - x.after);
+
+    return { rows, roundNumbers: targetRounds.map(r => r.roundNumber) };
+  },
+
   /**
    * 指標（ソルコフ・ソルコフ−敗数）の順位・平均・標準偏差。
    * 対象は1局以上対局した選手。順位は値の大きい順で、同じ値は同順位（1, 1, 3…）。

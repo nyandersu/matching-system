@@ -400,6 +400,8 @@ const UI = {
         : '対戦相手のランク帯の均等化';
     }
     document.getElementById('mean-balance-group')?.classList.toggle('hidden', !ratingMode);
+    document.getElementById('rating-update-btn')?.classList.toggle('hidden', !ratingMode);
+    document.getElementById('fill-initial-ratings-btn')?.classList.toggle('hidden', !ratingMode);
     document.querySelectorAll('.display-chip[data-key="rank"]').forEach(chip => {
       chip.textContent = ratingMode ? 'レーティング' : 'ランク';
     });
@@ -462,6 +464,7 @@ const UI = {
     document.querySelectorAll('#strength-mode-bar .sort-chip').forEach(chip => {
       chip.addEventListener('click', () => this.setStrengthMode(chip.dataset.mode));
     });
+    document.getElementById('fill-initial-ratings-btn').addEventListener('click', () => this.fillInitialRatings());
   },
 
   setStrengthMode(mode) {
@@ -1483,6 +1486,7 @@ const UI = {
     const rounds = AppStorage.getRounds();
     const round = rounds[roundIndex];
     if (!round) return;
+    if (round.rated && !confirm(`第${round.roundNumber}回戦の結果は、すでにレーティングに反映済みです。\n確定を解除して結果を直しても、レーティングは自動では直りません（「↩ 元に戻す」で反映前に戻せます）。\n確定を解除しますか？`)) return;
     AppStorage.setRoundConfirmed(roundIndex, false);
     this.renderRounds();
     this.showToast(`第${round.roundNumber}回戦の確定を解除しました`, 'info');
@@ -1615,6 +1619,98 @@ const UI = {
   // ============================================
   // 個人成績モーダル
   // ============================================
+
+  // ============================================
+  // レーティング（初期値・結果からの更新）
+  // ============================================
+
+  /** レーティング未入力の選手に、ランクから初期値を入れる（S=1800 / A=1600 / B=1400 / C=1200） */
+  fillInitialRatings() {
+    const table   = Matching.INITIAL_RATING_BY_RANK;
+    const targets = AppStorage.getPlayers().filter(p => Matching.hasNoRating(p));
+    if (targets.length === 0) {
+      this.showToast('レーティング未入力の選手はいません', 'info');
+      return;
+    }
+    const msg = `レーティング未入力の${targets.length}人に、ランクから初期値を入れますか？\n\n`
+      + `S=${table.S} / A=${table.A} / B=${table.B} / C=${table.C}\n`
+      + '（1段階200点差。強いほうの期待勝率が約76%になる差です。入力済みの選手は変更しません）';
+    if (!confirm(msg)) return;
+    AppStorage.createSnapshot('ランクから初期値を入れる前');
+    targets.forEach(p => AppStorage.updatePlayer(p.id, { rating: table[p.rank] ?? table.C }));
+    this.renderAll();
+    this.showToast(`${targets.length}人にレーティングの初期値を入れました`, 'success');
+  },
+
+  showRatingUpdate() {
+    const modal = document.getElementById('rating-update-modal');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      const close = () => modal.classList.add('hidden');
+      document.getElementById('rating-update-close').addEventListener('click', close);
+      document.getElementById('rating-update-cancel').addEventListener('click', close);
+      modal.addEventListener('click', e => { if (e.target === modal) close(); });
+      document.querySelectorAll('#rating-k-segment .wseg-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#rating-k-segment .wseg-btn').forEach(b => b.classList.toggle('wseg-active', b === btn));
+          this._renderRatingPreview();
+        });
+      });
+      document.getElementById('rating-update-apply').addEventListener('click', () => this._applyRatingUpdate());
+    }
+    if (this._renderRatingPreview()) modal.classList.remove('hidden');
+  },
+
+  _ratingK() {
+    const active = document.querySelector('#rating-k-segment .wseg-active');
+    return active ? Number(active.dataset.value) : 32;
+  },
+
+  /** プレビューを描画。対象がなければトーストを出して false */
+  _renderRatingPreview() {
+    const rounds = AppStorage.getRounds();
+    const res = Matching.computeRatingUpdate(AppStorage.getPlayers(), rounds, { k: this._ratingK() });
+    if (res.error) { this.showToast(res.error, 'error'); return false; }
+    if (res.roundNumbers.length === 0 || res.rows.length === 0) {
+      const unconfirmed = rounds.filter(r => !r.confirmed).length;
+      this.showToast(unconfirmed > 0
+        ? 'レーティングに反映できる回戦がありません（結果入力タブで回戦を確定すると反映できます）'
+        : 'すべての確定済みの回戦は、すでにレーティングに反映済みです', 'info');
+      return false;
+    }
+    this._ratingPreview = res;
+
+    const nums = res.roundNumbers;
+    document.getElementById('rating-update-summary').textContent =
+      `確定済みでまだ反映していない第${nums.join('・')}回戦の結果で、${res.rows.length}人のレーティングを更新します。`;
+    const fmt = n => (Math.round(n * 10) / 10).toFixed(1);
+    const signed = d => (d > 0 ? `+${d}` : d < 0 ? `−${-d}` : '±0');
+    document.getElementById('rating-update-table').innerHTML = `
+      <thead><tr><th>選手</th><th>現在</th><th>対局</th><th>期待勝数</th><th>実際</th><th>変化</th><th>更新後</th></tr></thead>
+      <tbody>${res.rows.map(r => `
+        <tr>
+          <td class="opp-name">${this.escapeHtml(r.name)}</td>
+          <td>${this.escapeHtml(this.formatRating(r.before))}</td>
+          <td>${r.games}</td>
+          <td class="opp-muted">${fmt(r.expected)}</td>
+          <td>${fmt(r.actual)}</td>
+          <td class="${r.delta > 0 ? 'opp-diff-up' : r.delta < 0 ? 'opp-diff-down' : ''}">${signed(r.delta)}</td>
+          <td><strong>${this.escapeHtml(this.formatRating(r.after))}</strong></td>
+        </tr>`).join('')}
+      </tbody>`;
+    return true;
+  },
+
+  _applyRatingUpdate() {
+    const res = this._ratingPreview;
+    if (!res) return;
+    AppStorage.createSnapshot('レーティング更新の前');
+    AppStorage.applyRatingUpdate(res.rows, res.roundNumbers);
+    this._ratingPreview = null;
+    document.getElementById('rating-update-modal').classList.add('hidden');
+    this.renderAll();
+    this.showToast(`${res.rows.length}人のレーティングを更新しました（第${res.roundNumbers.join('・')}回戦）`, 'success');
+  },
 
   // ============================================
   // 元に戻す（変更履歴）
@@ -1899,6 +1995,8 @@ const UI = {
   },
 
   bindSettingsEvents() {
+    document.getElementById('rating-update-btn').addEventListener('click', () => this.showRatingUpdate());
+
     document.getElementById('export-standings-btn').addEventListener('click', () => {
       const players = AppStorage.getPlayers();
       const rounds = AppStorage.getRounds();

@@ -195,3 +195,36 @@ test('途中棄権：残す回戦の続きだけを、棄権した選手を除�
   }));
   active.forEach(p => assert.ok(Math.abs(sente[p.id] - games[p.id] / 2) <= 1, `${p.id}: 先手${sente[p.id]} / ${games[p.id]}局`));
 });
+
+test('レーティング更新：期待勝率・変化量・対象の回戦', () => {
+  assert.ok(Math.abs(Matching.expectedScore(1600, 1400) - 0.7597) < 1e-3, '200点差で約76%');
+  assert.equal(Matching.expectedScore(1500, 1500), 0.5);
+
+  const players = [
+    { id: 'a', name: 'A', rating: 1500 }, { id: 'b', name: 'B', rating: 1500 },
+    { id: 'c', name: 'C', rating: 1700 }, { id: 'd', name: 'D', rating: 1300 },
+  ];
+  const rounds = [
+    { roundNumber: 1, confirmed: true, rated: false, byePlayerId: null, matches: [
+      { player1Id: 'a', player2Id: 'b', result: 'player1' },   // 同じレート：勝ち +16 / 負け −16
+      { player1Id: 'c', player2Id: 'd', result: 'draw' } ] },  // 400点差の引き分け：強いほうが下がる
+    { roundNumber: 2, confirmed: true, rated: true,  byePlayerId: null, matches: [
+      { player1Id: 'a', player2Id: 'c', result: 'player1' } ] },   // 反映済み → 対象外
+    { roundNumber: 3, confirmed: false, rated: false, byePlayerId: null, matches: [
+      { player1Id: 'b', player2Id: 'd', result: 'player1' } ] },   // 未確定 → 対象外
+  ];
+  const res = Matching.computeRatingUpdate(players, rounds, { k: 32 });
+  assert.equal(res.error, undefined);
+  assert.deepEqual(res.roundNumbers, [1]);
+  const by = Object.fromEntries(res.rows.map(r => [r.id, r]));
+  assert.equal(by.a.delta, 16); assert.equal(by.b.delta, -16);
+  assert.equal(by.c.delta, -13); assert.equal(by.d.delta, 13);   // 32 × (0.5 − 0.909) ≒ −13
+  assert.equal(by.a.after, 1516);
+  assert.equal(res.rows.reduce((s, r) => s + r.delta, 0), 0, '変化量の合計は0');
+});
+
+test('レーティング更新：未入力の選手がいるとエラー', () => {
+  const players = [{ id: 'a', name: 'A', rating: 1500 }, { id: 'b', name: 'B', rating: null }];
+  const rounds = [{ roundNumber: 1, confirmed: true, rated: false, matches: [{ player1Id: 'a', player2Id: 'b', result: 'player1' }] }];
+  assert.match(Matching.computeRatingUpdate(players, rounds).error, /未入力.*B/);
+});
