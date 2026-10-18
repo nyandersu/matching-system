@@ -396,6 +396,7 @@ const AppStorage = {
       matches:       r.matches,
       bye_player_id: r.byePlayerId,
       confirmed:     !!r.confirmed,
+      rated:         !!r.rated,
     };
   },
 
@@ -480,6 +481,7 @@ const AppStorage = {
           matches:     r.matches,
           byePlayerId: r.bye_player_id,
           confirmed:   !!r.confirmed,
+          rated:       !!r.rated,
         }));
       } else if (data.rounds.length > 0) {
         this._remote('対戦表', () => supabaseClient.from('rounds').upsert(data.rounds.map(r => this._roundRow(r))));
@@ -772,6 +774,22 @@ const AppStorage = {
         room_id: this.roomId, data: league, updated_at: new Date().toISOString(),
       });
     });
+  },
+
+  /**
+   * レーティング更新の反映。選手のレーティングと回戦の「反映済み」を、サーバーで1回の処理として更新する
+   * （他の端末と同時に押しても二重に反映されない。失敗したらサーバーの状態に戻る）。
+   */
+  applyRatingUpdate(rows, roundNumbers) {
+    const data = this.loadAll();
+    const after = Object.fromEntries(rows.map(r => [r.id, r.after]));
+    data.players.forEach(p => { if (p.id in after) p.rating = after[p.id]; });
+    data.rounds.forEach(r => { if (roundNumbers.includes(r.roundNumber)) r.rated = true; });
+    this._saveLocal(data);
+    this._remote('レーティング更新', () => supabaseClient.rpc('rating_apply', {
+      p_updates: rows.map(r => ({ id: r.id, rating: r.after })),
+      p_rounds:  roundNumbers,
+    }));
   },
 
   resetAll() {

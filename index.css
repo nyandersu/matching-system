@@ -3081,3 +3081,16 @@ body::before {
 .history-meta  { font-size: 12px; color: var(--text-muted); }
 .history-item .btn { flex-shrink: 0; }
 .history-empty { font-size: 13px; color: var(--text-muted); }
+
+/* --- レーティング更新 --- */
+.rating-update-card { max-width: 620px; }
+.rating-update-k {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+.rating-update-k .weight-segment { flex: 1; min-width: 240px; }
+.rating-update-card .btn-group { margin-top: 14px; }
+#strength-mode-bar .btn-edit-mode { margin-left: auto; }
