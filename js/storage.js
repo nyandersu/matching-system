@@ -330,7 +330,7 @@ const AppStorage = {
   async listRatingHistory(clubPlayerId) {
     if (!supabaseClient) return [];
     const { data, error } = await supabaseClient.from('rating_history')
-      .select('room_id, rounds, before, after, created_at')
+      .select('room_id, rounds, before, after, created_at, source, term')
       .eq('club_player_id', clubPlayerId)
       .order('created_at');
     if (error) throw new Error('レーティング履歴の取得に失敗しました');
@@ -945,6 +945,22 @@ const AppStorage = {
     this._remote('レーティング更新', () => supabaseClient.rpc('rating_apply', {
       p_updates: rows.map(r => ({ id: r.id, rating: r.after })),
       p_rounds:  roundNumbers,
+    }));
+  },
+
+  /**
+   * リーグ戦の期の結果をレーティングに反映（部屋の選手・名簿・履歴）。
+   * サーバー側で期の「反映済み」を同時に立てるので、同じ期が二重に反映されない。
+   * リーグ戦データ全体の保存（期の確定）より先に呼ぶこと（書き込み順を守るため）。
+   */
+  applyLeagueRatingUpdate(rows, term) {
+    const data = this.loadAll();
+    const after = Object.fromEntries(rows.map(r => [r.id, r.after]));
+    data.players.forEach(p => { if (p.id in after) p.rating = after[p.id]; });
+    this._saveLocal(data);
+    this._remote('リーグ戦のレーティング更新', () => supabaseClient.rpc('rating_apply_league', {
+      p_updates: rows.map(r => ({ id: r.id, rating: r.after })),
+      p_term:    term,
     }));
   },
 

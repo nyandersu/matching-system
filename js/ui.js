@@ -510,7 +510,8 @@ const UI = {
       const before = Number(h.before), after = Number(h.after);
       const delta = Math.round(after - before);
       const sign = delta > 0 ? `+${delta}` : delta < 0 ? `−${-delta}` : '±0';
-      return `<li>${d.getMonth() + 1}/${d.getDate()}　部屋 ${this.escapeHtml(h.room_id || '')} 第${this.escapeHtml((h.rounds || []).join('・'))}回戦　`
+      const where = h.source === 'league' ? `リーグ第${this.escapeHtml(h.term)}期` : `第${this.escapeHtml((h.rounds || []).join('・'))}回戦`;
+      return `<li>${d.getMonth() + 1}/${d.getDate()}　部屋 ${this.escapeHtml(h.room_id || '')} ${where}　`
         + `${this.escapeHtml(this.formatRating(before))} → <strong>${this.escapeHtml(this.formatRating(after))}</strong>`
         + ` <span class="${delta > 0 ? 'opp-diff-up' : delta < 0 ? 'opp-diff-down' : ''}">(${sign})</span></li>`;
     }).join('')}</ul>`;

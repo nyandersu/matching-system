@@ -464,7 +464,7 @@ const League = {
   /** 階級の出場メンバーで総当たり表を作る（先手回数を均等に） */
   _roundRobinMatches(league, classId) {
     return LeagueLogic.roundRobin(this._activeMemberIds(league, classId))
-      .map(m => ({ id: this._genId(), p1Id: m.p1Id, p2Id: m.p2Id, result: null }));
+      .map(m => ({ id: this._genId(), round: m.round, p1Id: m.p1Id, p2Id: m.p2Id, result: null }));
   },
 
   /** 選手の階級割当セクション */
@@ -612,6 +612,56 @@ const League = {
       .map(m => m.playerId);
   },
 
+  /**
+   * 階級の対局を節ごとにまとめる。
+   * 節が記録されていない対局（以前に作った総当たり表）は、出場メンバーの円卓法の組み合わせから節を割り出す。
+   * 途中参加などで割り出せない対局は「追加」にまとめる。
+   * @returns {Array} [{ round, matches }]（round が null のものが追加）
+   */
+  _scheduleOf(league, classId) {
+    const term = this._getCurrentTerm(league);
+    const matches = term.matches[classId] || [];
+    const key = (a, b) => [a, b].sort().join('|');
+    const derived = new Map(LeagueLogic.roundRobin(this._activeMemberIds(league, classId)).map(m => [key(m.p1Id, m.p2Id), m.round]));
+    const byRound = new Map();
+    matches.forEach(m => {
+      const r = m.round ?? derived.get(key(m.p1Id, m.p2Id)) ?? null;
+      if (!byRound.has(r)) byRound.set(r, []);
+      byRound.get(r).push(m);
+    });
+    return [...byRound.entries()]
+      .sort((a, b) => (a[0] ?? Infinity) - (b[0] ?? Infinity))
+      .map(([round, ms]) => ({ round, matches: ms }));
+  },
+
+  /** 表示を星取り表／節ごとで切り替え */
+  matchesLayout: 'cross',
+
+  setMatchesLayout(layout) {
+    this.matchesLayout = layout === 'schedule' ? 'schedule' : 'cross';
+    this.render();
+  },
+
+  _renderSchedule(league, cls, pmap) {
+    const name = id => this._esc(pmap[id]?.name || '?');
+    const res = m => m.result === 'p1' ? '<span class="lx-win">先手勝ち</span>'
+      : m.result === 'p2' ? '<span class="lx-win">後手勝ち</span>'
+      : m.result === 'draw' ? '△ 引き分け' : '<span class="opp-muted">未入力</span>';
+    return `
+      <div class="league-schedule">
+        ${this._scheduleOf(league, cls.id).map(r => `
+          <div class="league-schedule-round">
+            <div class="league-schedule-head">${r.round ? `第${r.round}節` : '追加の対局'}</div>
+            ${r.matches.map(m => `
+              <div class="league-schedule-game">
+                <span>${name(m.p1Id)}<small>（先）</small></span><span class="opp-muted">vs</span>
+                <span>${name(m.p2Id)}<small>（後）</small></span><span class="league-schedule-res">${res(m)}</span>
+              </div>`).join('')}
+          </div>`).join('')}
+      </div>
+      <p class="league-cross-hint">各節で全員が1局ずつ指す組み合わせです（奇数人数なら各節1人が休み）。結果は星取り表で入力します。</p>`;
+  },
+
   /** 対局・結果ビュー */
   _renderMatchesView(league) {
     const term = this._getCurrentTerm(league);
@@ -632,6 +682,12 @@ const League = {
         <button class="btn btn-primary" onclick="League.generateRoundRobin()">
           ${hasAnyMatches ? '総当たり表を再生成' : '総当たり表を生成'}
         </button>
+        ${hasAnyMatches ? `
+        <div class="display-opts-bar">
+          <span class="display-opts-label">表示</span>
+          <button type="button" class="sort-chip ${this.matchesLayout === 'cross' ? 'active' : ''}" onclick="League.setMatchesLayout('cross')">星取り表</button>
+          <button type="button" class="sort-chip ${this.matchesLayout === 'schedule' ? 'active' : ''}" onclick="League.setMatchesLayout('schedule')">節ごとの日程</button>
+        </div>` : ''}
       </div>`;
 
     classes.forEach(cls => {
@@ -648,8 +704,9 @@ const League = {
         const done = matches.filter(m => m.result).length;
         inner = `
           <p class="league-class-progress">${done} / ${matches.length} 局 完了</p>
+          ${this.matchesLayout === 'schedule' ? this._renderSchedule(league, cls, pmap) : `
           ${this._renderCrossTable(league, term, cls, pmap)}
-          <p class="league-cross-hint">セルをタップで結果を入力（空欄→○→△→●→空欄）。右端の「休」で休場。</p>`;
+          <p class="league-cross-hint">セルをタップで結果を入力（空欄→○→△→●→空欄）。右端の「休」で休場。</p>`}`;
       }
       html += `
         <div class="card">
@@ -1043,6 +1100,39 @@ const League = {
   /** 期の確定時に、休場中の選手を次の期は出場に戻すか */
   _resetAbsent: true,
 
+  /** 期の確定時に、この期の結果でレーティングを更新するか（null = 未選択で既定に従う） */
+  _applyRating: null,
+
+  /** この期の結果でのレーティング更新（イロ方式・K=32）。対象がなければ null、未入力がいれば error */
+  _leagueRatingUpdate(league, term) {
+    if (term.rated) return null;
+    const matches = Object.values(term.matches || {}).flat().filter(m => m.result);
+    if (matches.length === 0) return null;
+    const pseudoRound = {
+      roundNumber: term.term, confirmed: true, rated: false,
+      matches: matches.map(m => ({
+        player1Id: m.p1Id, player2Id: m.p2Id,
+        result: m.result === 'p1' ? 'player1' : m.result === 'p2' ? 'player2' : 'draw',
+      })),
+    };
+    return Matching.computeRatingUpdate(AppStorage.getPlayers(), [pseudoRound], { k: 32 });
+  },
+
+  _ratingPreviewLine(league, term) {
+    const res = this._leagueRatingUpdate(league, term);
+    if (!res) return '';
+    if (res.error) {
+      return `<p class="league-section-note">レーティングの更新：${this._esc(res.error)}（全員にレーティングを入れると、期の確定時に更新できます）</p>`;
+    }
+    const on = this._applyRating ?? true;
+    const top = res.rows.slice(0, 3).map(r => `${this._esc(r.name)} ${r.delta > 0 ? '+' : ''}${r.delta}`).join('、');
+    return `
+      <label class="roster-check league-reset-absent">
+        <input type="checkbox" ${on ? 'checked' : ''} onchange="League._applyRating = this.checked">
+        この期の結果でレーティングを更新する（${res.rows.length}人。例：${top}…）
+      </label>`;
+  },
+
   setSwapCount(boundaryIndex, value) {
     this._swapCounts[boundaryIndex] = Math.max(0, parseInt(value) || 0);
     this._tieChoices = {};
@@ -1169,6 +1259,7 @@ const League = {
           <input type="checkbox" ${this._resetAbsent ? 'checked' : ''} onchange="League._resetAbsent = this.checked">
           休場中の選手は、次の期から出場に戻す
         </label>
+        ${this._ratingPreviewLine(league, term)}
         <button class="btn btn-primary league-finalize-btn" onclick="League.finalizeTerm()">
           第${league.currentTerm}期を確定して次の期へ
         </button>
@@ -1260,13 +1351,23 @@ const League = {
     term.changes = changes;
     league.currentTerm = (league.currentTerm || 1) + 1;
 
+    // レーティング更新（リーグ戦データの保存より先に送る：サーバーで期の「反映済み」を立てるため）
+    const ratingRes = this._leagueRatingUpdate(league, term);
+    let ratingCount = 0;
+    if (ratingRes && !ratingRes.error && (this._applyRating ?? true)) {
+      AppStorage.applyLeagueRatingUpdate(ratingRes.rows, term.term);
+      term.rated = true;
+      ratingCount = ratingRes.rows.length;
+    }
+    this._applyRating = null;
+
     AppStorage.saveLeague(league);
     this._swapCounts = {};
     this._tieChoices = {};
     this.subView = 'manage';
     this.render();
     UI.showToast(
-      `第${term.term}期を確定しました（昇降級${changes.length}件）。第${league.currentTerm}期を開始します。`,
+      `第${term.term}期を確定しました（昇降級${changes.length}件${ratingCount ? `・レーティング更新${ratingCount}人` : ''}）。第${league.currentTerm}期を開始します。`,
       'success'
     );
   },
@@ -1321,6 +1422,7 @@ const League = {
     document.getElementById('league-pdf-note').textContent = {
       standings: '昇級・降級の印は、順位表タブの昇降級の設定に基づく予定です。境目が同点でプレーオフの結果を選んでいない選手は「同点」と表示します。',
       cross: '1階級1ページ。未入力の対局は空欄なので、印刷して手書きで記入することもできます。人数が多い階級は A4 横がおすすめです。',
+      schedule: '1階級1ページ。節ごとの対局（先手・後手）の一覧です。総当たり表を作ってから出力してください。',
       report: '選手ごとに、この期のリーグ戦の結果と、この部屋の内戦の結果をまとめます。部の名簿にひも付いた選手は通算成績も載せます。',
     }[kind];
   },
@@ -1342,6 +1444,20 @@ const League = {
     }
     if (classes.length === 0) { UI.showToast('階級がありません', 'error'); return; }
 
+    if (kind === 'schedule') {
+      const pmap = this._playerMap();
+      await PDF.exportLeagueSchedule({
+        title: 'リーグ戦 日程表', termLabel,
+        classes: classes.map(c => ({
+          name: c.name,
+          rounds: this._scheduleOf(league, c.id).map(r => ({
+            round: r.round,
+            games: r.matches.map(m => ({ sente: pmap[m.p1Id]?.name || '?', gote: pmap[m.p2Id]?.name || '?', result: m.result })),
+          })),
+        })).filter(c => c.rounds.length > 0),
+      }, { orientation });
+      return;
+    }
     if (kind === 'standings') {
       await PDF.exportLeagueStandings({
         title: 'リーグ戦 順位表', termLabel,
