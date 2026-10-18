@@ -48,7 +48,9 @@ const PDF = {
    *
    * 印刷ダイアログは経由しない。
    */
-  async _downloadPDF(contentHtml, filename) {
+  async _downloadPDF(contentHtml, filename, opts = {}) {
+    // orientation: 'portrait'（A4縦）| 'landscape'（A4横）
+    const orientation = opts.orientation === 'landscape' ? 'landscape' : 'portrait';
     if (typeof html2canvas === 'undefined' || typeof window.jspdf === 'undefined') {
       alert('PDF生成ライブラリが読み込まれていません。ページを再読み込みしてください。');
       return;
@@ -62,7 +64,7 @@ const PDF = {
         font-size: 13px;
         color: #1a1a2e;
         padding: 24px 28px;
-        width: 794px;
+        width: ${orientation === 'landscape' ? 1123 : 794}px;
       }
       h1 { font-size: 22px; text-align: center; margin-bottom: 4px; }
       .subtitle { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px; }
@@ -91,6 +93,22 @@ const PDF = {
       .rank-C { background:#2ecc71; color:#1a1a2e; padding:1px 5px; border-radius:3px; font-weight:bold; font-size:11px; display:inline-block; }
       .bye-note { color: #888; font-size: 12px; margin: 4px 0 14px; }
       .pdf-round { display: block; }
+      /* リーグ戦：星取り表・個人成績書 */
+      table.lx { width: auto; margin: 0 auto 10px; }
+      .lx th, .lx td { padding: 5px 4px; font-size: 11px; }
+      .lx .lx-no { width: 26px; }
+      .lx .lx-name { text-align: left; white-space: nowrap; padding: 5px 10px; min-width: 110px; }
+      .lx .lx-diag { background: #ddd !important; }
+      .lx .lx-cell { width: 30px; height: 26px; font-size: 14px; }
+      .lx .lx-win { color: #8a5800; font-weight: bold; }
+      .lx .lx-loss { color: #c0392b; }
+      .lx .lx-sum { width: 30px; font-weight: bold; }
+      .note { color: #666; font-size: 11px; margin: 6px 0 14px; }
+      .report-meta { display: flex; justify-content: center; gap: 18px; color: #444; font-size: 12px; margin-bottom: 14px; }
+      .report-summary td { font-size: 13px; }
+      .promote { color: #1f7a3a; font-weight: bold; }
+      .demote { color: #c0392b; font-weight: bold; }
+      .tie { color: #8a5800; font-weight: bold; }
     `;
 
     // 既存のレンダリング用 iframe があれば削除
@@ -107,7 +125,7 @@ const PDF = {
     // 中の requestAnimationFrame / html2canvas が動作しなくなる。
     // 視認上は見えないが正の寸法を持つよう、極小サイズで画面右下に配置する。
     iframe.style.cssText = `
-      width: 800px; height: 1px; border: 0;
+      width: ${orientation === 'landscape' ? 1130 : 800}px; height: 1px; border: 0;
       position: fixed; right: 0; bottom: 0;
       overflow: hidden;
       pointer-events: none;
@@ -115,7 +133,7 @@ const PDF = {
     document.body.appendChild(iframe);
 
     try {
-      const blob = await this._renderPdfInIframe(iframe, contentHtml, styleCss);
+      const blob = await this._renderPdfInIframe(iframe, contentHtml, styleCss, orientation);
       // ダウンロードトリガー
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -140,7 +158,7 @@ const PDF = {
    * ライブラリ自体も iframe 内で読み込み直す。
    * 完了したら postMessage で blob を親に返す。
    */
-  _renderPdfInIframe(iframe, contentHtml, styleCss) {
+  _renderPdfInIframe(iframe, contentHtml, styleCss, orientation = 'portrait') {
     const reqId = '__pdf_req_' + Date.now() + '_' + Math.random().toString(36).slice(2);
 
     return new Promise((resolve, reject) => {
@@ -215,7 +233,7 @@ const PDF = {
     }
 
     const { jsPDF } = window.jspdf;
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: ${JSON.stringify(orientation)} });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
     const margin = 10;
@@ -398,6 +416,87 @@ const PDF = {
   /**
    * 成績表HTML生成
    */
+  // ============================================
+  // リーグ戦
+  // ============================================
+
+  _header(title, subtitle) {
+    return `<h1>${this._esc(title)}</h1><p class="subtitle">${this._esc(subtitle)}　生成日: ${new Date().toLocaleDateString('ja-JP')}</p>`;
+  },
+
+  /**
+   * リーグ戦の順位表。data: { title, termLabel, classes: [{ name, rows: [{ pos, name, w, l, d, pts, mark }] }], onePerPage }
+   * mark: 'promote' | 'demote' | 'tie' | null（昇級・降級・同点で要プレーオフ）
+   */
+  exportLeagueStandings(data, opts = {}) {
+    const markText = { promote: '▲ 昇級', demote: '▼ 降級', tie: '同点（プレーオフ）' };
+    const block = c => `
+      <h2>${this._esc(c.name)}</h2>
+      <table>
+        <thead><tr><th>順位</th><th>選手</th><th>勝</th><th>敗</th><th>分</th><th>Pt</th><th></th></tr></thead>
+        <tbody>${c.rows.map(r => `
+          <tr><td><strong>${this._esc(r.pos)}</strong></td><td class="name-td">${this._esc(r.name)}</td>
+            <td class="win-td">${this._esc(r.w)}</td><td class="loss-td">${this._esc(r.l)}</td><td>${this._esc(r.d)}</td>
+            <td class="pt-td">${this._esc(r.pts)}</td>
+            <td>${r.mark ? `<span class="${r.mark}">${markText[r.mark]}</span>` : ''}</td></tr>`).join('')}
+        </tbody>
+      </table>`;
+    const html = this._header(data.title, data.termLabel)
+      + data.classes.map(c => data.onePerPage ? `<div class="pdf-round">${block(c)}</div>` : block(c)).join('')
+      + `<p class="note">勝利2Pt・引き分け1Pt。昇級・降級の印は、順位表タブの昇降級の設定（入替人数・プレーオフの選択）に基づく予定です。</p>`;
+    return this._downloadPDF(html, `リーグ順位表_${this._today()}.pdf`, opts);
+  },
+
+  /**
+   * リーグ戦の対戦表（星取り表）。1階級1ページ。未入力の対局は空欄（手書きで記入できる）。
+   * data: { title, termLabel, classes: [{ name, players: [name], cells: [[ 'win'|'loss'|'draw'|null|'self' ]], sums: [{ w, l, d }] }] }
+   */
+  exportLeagueCrossTables(data, opts = {}) {
+    const sym = { win: '○', loss: '●', draw: '△' };
+    const html = this._header(data.title, data.termLabel) + data.classes.map(c => `
+      <div class="pdf-round">
+        <h2>${this._esc(c.name)}（${c.players.length}名）</h2>
+        <table class="lx">
+          <thead><tr><th class="lx-no"></th><th class="lx-name">選手</th>${c.players.map((_, j) => `<th>${j + 1}</th>`).join('')}<th>勝</th><th>敗</th><th>分</th></tr></thead>
+          <tbody>${c.players.map((name, i) => `
+            <tr><td class="lx-no">${i + 1}</td><td class="lx-name">${this._esc(name)}</td>
+              ${c.cells[i].map(v => v === 'self'
+                ? '<td class="lx-diag"></td>'
+                : `<td class="lx-cell ${v ? `lx-${v}` : ''}">${v ? sym[v] : ''}</td>`).join('')}
+              <td class="lx-sum">${this._esc(c.sums[i].w)}</td><td class="lx-sum">${this._esc(c.sums[i].l)}</td><td class="lx-sum">${this._esc(c.sums[i].d)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <p class="note">行の選手から見た結果（○勝ち・●負け・△引き分け）。空欄は未対局です。</p>
+      </div>`).join('');
+    return this._downloadPDF(html, `リーグ対戦表_${this._today()}.pdf`, opts);
+  },
+
+  /**
+   * 個人成績書（1人1ページ）。
+   * reports: [{ name, meta: [文字列], summary: [{ label, value }], sections: [{ title, head: [..], rows: [[..]] }] }]
+   */
+  exportPlayerReports(reports, opts = {}) {
+    const html = reports.map((r, i) => `
+      <div class="pdf-round">
+        <h1>${this._esc(r.name)} 個人成績書</h1>
+        <p class="report-meta">${r.meta.map(m => `<span>${this._esc(m)}</span>`).join('')}<span>生成日: ${new Date().toLocaleDateString('ja-JP')}</span></p>
+        ${r.summary.length ? `
+        <table class="report-summary">
+          <thead><tr>${r.summary.map(s => `<th>${this._esc(s.label)}</th>`).join('')}</tr></thead>
+          <tbody><tr>${r.summary.map(s => `<td><strong>${this._esc(s.value)}</strong></td>`).join('')}</tr></tbody>
+        </table>` : ''}
+        ${r.sections.map(sec => `
+          <h2>${this._esc(sec.title)}</h2>
+          ${sec.rows.length === 0 ? '<p class="note">対局はありません。</p>' : `
+          <table>
+            <thead><tr>${sec.head.map(h => `<th>${this._esc(h)}</th>`).join('')}</tr></thead>
+            <tbody>${sec.rows.map(row => `<tr>${row.map((v, ci) => `<td class="${ci === 1 ? 'name-td' : ''}">${this._esc(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+          </table>`}`).join('')}
+      </div>`).join('');
+    const filename = reports.length === 1 ? `個人成績書_${reports[0].name}_${this._today()}.pdf` : `個人成績書_${this._today()}.pdf`;
+    return this._downloadPDF(html, filename, opts);
+  },
+
   buildStandingsHTML(standings, opts = { showPoints: true }) {
     const showPt = opts.showPoints !== false;
     let html = `

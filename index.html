@@ -546,6 +546,35 @@
   </div>
 </div>
 
+<!-- リーグ戦の PDF 出力 -->
+<div id="league-pdf-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card">
+    <button class="modal-close" id="league-pdf-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">リーグ戦の PDF 出力</h3>
+    <div class="league-pdf-form">
+      <label class="form-label" for="league-pdf-kind">種類</label>
+      <select id="league-pdf-kind" class="form-select">
+        <option value="standings">順位表</option>
+        <option value="cross">対戦表（星取り表）</option>
+        <option value="report">個人成績書</option>
+      </select>
+      <label class="form-label" for="league-pdf-target">対象</label>
+      <select id="league-pdf-target" class="form-select"></select>
+      <label class="form-label" for="league-pdf-orientation">用紙</label>
+      <select id="league-pdf-orientation" class="form-select">
+        <option value="portrait">A4 縦</option>
+        <option value="landscape">A4 横</option>
+      </select>
+      <label class="roster-check" id="league-pdf-perpage-wrap"><input type="checkbox" id="league-pdf-perpage"> 1階級ごとに改ページ</label>
+    </div>
+    <p class="pt-info-note" id="league-pdf-note"></p>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="league-pdf-apply">PDF を作成</button>
+      <button class="btn btn-secondary" id="league-pdf-cancel">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <!-- 名簿から部屋に追加 -->
 <div id="roster-pick-modal" class="modal-overlay hidden">
   <div class="modal-card history-card">
