@@ -128,3 +128,70 @@ test('スイスドロー：再戦なしで1回戦ずつ生成できる', () => {
   }
   assertValidSchedule(players, rounds, 5);
 });
+
+test('成績：ソルコフとソルコフ−敗数、その順位・平均・標準偏差', () => {
+  // A>B, A>C, B>C, D は不戦勝のみ（対局なし）
+  const players = ['A', 'B', 'C', 'D'].map(id => ({ id, name: id, grade: 1, rank: 'B' }));
+  const rounds = [
+    { roundNumber: 1, byePlayerId: 'D', matches: [{ player1Id: 'A', player2Id: 'B', result: 'player1' }] },
+    { roundNumber: 2, byePlayerId: null, matches: [{ player1Id: 'A', player2Id: 'C', result: 'player1' },
+                                                   { player1Id: 'B', player2Id: 'D', result: null }] },
+    { roundNumber: 3, byePlayerId: null, matches: [{ player1Id: 'B', player2Id: 'C', result: 'player1' }] },
+  ];
+  const standings = Matching.calculateStandings(players, rounds, true);
+  const by = Object.fromEntries(standings.map(s => [s.id, s]));
+  // 勝ち点：A=4, B=2, C=0, D=2（不戦勝）
+  assert.equal(by.A.points, 4); assert.equal(by.B.points, 2); assert.equal(by.C.points, 0);
+  // ソルコフ：A=B+C=2, B=A+C=4, C=A+B=6。未入力の対局（B-D）は含めない
+  assert.equal(by.A.solkoff, 2); assert.equal(by.B.solkoff, 4); assert.equal(by.C.solkoff, 6);
+  assert.equal(by.D.solkoff, 0);
+  // ソルコフ−敗数：A=2-0=2, B=4-1=3, C=6-2=4
+  assert.equal(by.A.solkoffMinusLosses, 2); assert.equal(by.B.solkoffMinusLosses, 3); assert.equal(by.C.solkoffMinusLosses, 4);
+
+  const summary = Matching.summarizeIndices(standings);
+  assert.equal(by.C.solkoffRank, 1); assert.equal(by.B.solkoffRank, 2); assert.equal(by.A.solkoffRank, 3);
+  assert.equal(by.D.solkoffRank, null, '対局のない選手は順位なし');
+  assert.equal(summary.solkoff.count, 3);
+  assert.equal(summary.solkoff.mean, 4);
+  assert.ok(Math.abs(summary.solkoff.sd - Math.sqrt(8 / 3)) < 1e-9, '母標準偏差');
+  assert.equal(summary.solkoffMinusLosses.mean, 3);
+});
+
+test('成績：同じ値は同順位（1, 1, 3）', () => {
+  const standings = [
+    { played: 1, solkoff: 5, solkoffMinusLosses: 5 },
+    { played: 1, solkoff: 5, solkoffMinusLosses: 4 },
+    { played: 1, solkoff: 3, solkoffMinusLosses: 3 },
+  ];
+  Matching.summarizeIndices(standings);
+  assert.deepEqual(standings.map(s => s.solkoffRank), [1, 1, 3]);
+});
+
+test('途中棄権：残す回戦の続きだけを、棄権した選手を除いて組み直せる', () => {
+  const all = makePlayers(12);
+  const first = Matching.generateAllRounds(all, 6, {});
+  const fixed = first.rounds.slice(0, 2);   // 2回戦まで結果入力済み
+  const active = all.filter(p => p.id !== 'p5');
+  const res = Matching.generateAllRounds(active, 6, { fixedRounds: fixed, assignSenteGote: true });
+  assert.ok(!res.error, res.error);
+  assert.deepEqual(res.rounds.map(r => r.roundNumber), [3, 4, 5, 6]);
+  res.rounds.forEach(r => {
+    const ids = r.matches.flatMap(m => [m.player1Id, m.player2Id]).concat(r.byePlayerId ? [r.byePlayerId] : []);
+    assert.ok(!ids.includes('p5'), '棄権した選手は以後の回戦に入らない');
+    assert.equal(new Set(ids).size, active.length);
+  });
+  // 残した回戦を含めて再戦がない
+  const keys = [...fixed, ...res.rounds].flatMap(r => r.matches.map(m => [m.player1Id, m.player2Id].sort().join('-')));
+  assert.equal(new Set(keys).size, keys.length, '再戦なし');
+  // 残した回戦は変更されない
+  assert.deepEqual(fixed, first.rounds.slice(0, 2));
+  // 先後は残した回戦も含めて均等
+  const sente = {}, games = {};
+  active.forEach(p => { sente[p.id] = 0; games[p.id] = 0; });
+  [...fixed, ...res.rounds].forEach(r => r.matches.forEach(m => {
+    if (m.player1Id in sente) sente[m.player1Id]++;
+    if (m.player1Id in games) games[m.player1Id]++;
+    if (m.player2Id in games) games[m.player2Id]++;
+  }));
+  active.forEach(p => assert.ok(Math.abs(sente[p.id] - games[p.id] / 2) <= 1, `${p.id}: 先手${sente[p.id]} / ${games[p.id]}局`));
+});
