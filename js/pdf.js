@@ -472,6 +472,28 @@ const PDF = {
   },
 
   /**
+   * リーグ戦の日程表（節ごと）。1階級1ページ。結果欄は入力済みなら記号、未入力は空欄。
+   * data: { title, termLabel, classes: [{ name, rounds: [{ round, games: [{ sente, gote, result }] }] }] }
+   */
+  exportLeagueSchedule(data, opts = {}) {
+    const sym = { p1: '先手勝ち', p2: '後手勝ち', draw: '引き分け' };
+    const html = this._header(data.title, data.termLabel) + data.classes.map(c => `
+      <div class="pdf-round">
+        <h2>${this._esc(c.name)}</h2>
+        <table>
+          <thead><tr><th style="width:70px">節</th><th>先手</th><th style="width:40px"></th><th>後手</th><th style="width:110px">結果</th></tr></thead>
+          <tbody>${c.rounds.map(r => r.games.map((g, gi) => `
+            <tr>${gi === 0 ? `<td rowspan="${r.games.length}"><strong>${r.round ? `第${this._esc(r.round)}節` : '追加'}</strong></td>` : ''}
+              <td class="name-td">${this._esc(g.sente)}</td><td>vs</td><td class="name-td">${this._esc(g.gote)}</td>
+              <td>${g.result ? this._esc(sym[g.result]) : ''}</td></tr>`).join('')).join('')}
+          </tbody>
+        </table>
+        <p class="note">各節で全員が1局ずつ指す組み合わせです（奇数人数の階級は各節1人が休み）。</p>
+      </div>`).join('');
+    return this._downloadPDF(html, `リーグ日程表_${this._today()}.pdf`, opts);
+  },
+
+  /**
    * 個人成績書（1人1ページ）。
    * reports: [{ name, meta: [文字列], summary: [{ label, value }], sections: [{ title, head: [..], rows: [[..]] }] }]
    */
