@@ -3214,3 +3214,8 @@ body::before {
 .league-pdf-form .roster-check { grid-column: 1 / -1; }
 .league-header { gap: 8px; }
 .pd-actions { display: flex; justify-content: flex-end; margin: -4px 0 10px; }
+
+/* --- リーグ戦の継続運用 --- */
+.league-term-name { max-width: 180px; padding: 6px 10px; font-size: 13px; }
+.league-style-select { width: auto; padding: 4px 8px; font-size: 13px; }
+.league-reset-absent { display: flex; margin: 10px 0 4px; }

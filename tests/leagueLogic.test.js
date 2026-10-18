@@ -125,3 +125,19 @@ test('総当たり表：全ペアが1回ずつ、先手回数が均等', () => {
   }
   assert.deepEqual(L.roundRobin(['a']), []);
 });
+
+test('グループ名の付け方：「B1・B2」の数字方式も崩れない', () => {
+  assert.equal(L.stripSiblingSuffix('B1'), 'B');
+  assert.equal(L.stripSiblingSuffix('B級2'), 'B級');
+  assert.equal(L.stripSiblingSuffix('1組'), '1組', '名前が空になる場合は外さない');
+  assert.equal(L.stripSiblingSuffix('A級'), 'A級');
+  assert.equal(L.siblingStyleOf(['B1', 'B2']), 'number');
+  assert.equal(L.siblingStyleOf(['B級 甲', 'B級 乙']), 'kanji');
+  assert.equal(L.siblingStyleOf(['A級']), null);
+  assert.deepEqual(L.defaultSiblingNames('B1', 2, 'number'), ['B1', 'B2']);
+  assert.deepEqual(L.defaultSiblingNames('B1', 3, 'number'), ['B1', 'B2', 'B3']);
+  assert.deepEqual(L.defaultSiblingNames('B2', 1, 'number'), ['B']);
+  const layout = L.planNextTermLayout([{ tier: 2, classIds: ['b1', 'b2'], baseName: 'B1', style: 'number' }],
+    { 2: Array.from({ length: 11 }, (_, i) => ({ playerId: 'p' + i, finalRank: i + 1 })) }, 8);
+  assert.deepEqual(layout[0].groups.map(g => g.name), ['B1', 'B2']);
+});
