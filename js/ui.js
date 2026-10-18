@@ -141,8 +141,8 @@ const UI = {
         errEl.classList.remove('hidden');
         return;
       }
-      if (password.length < 6) {
-        errEl.textContent = 'パスワードは6文字以上にしてください';
+      if (password.length < 8) {
+        errEl.textContent = 'パスワードは8文字以上にしてください';
         errEl.classList.remove('hidden');
         return;
       }
@@ -305,6 +305,8 @@ const UI = {
     if (bar && display && AppStorage.roomId) {
       display.textContent = AppStorage.roomId;
       bar.classList.remove('hidden');
+
+      document.getElementById('history-btn').addEventListener('click', () => this.showHistory());
 
       document.getElementById('change-room-btn').addEventListener('click', () => {
         const url = new URL(window.location.href);
@@ -560,11 +562,102 @@ const UI = {
     const player = players.find(p => p.id === id);
     if (!player) return;
 
+    // 対戦表に入っている選手を削除すると、対戦相手の成績からもその対局が消えてしまう。
+    // そのため削除ではなく「途中棄権」にする
+    if (this._appearsInRounds(id, AppStorage.getRounds())) {
+      this.withdrawPlayer(id);
+      return;
+    }
+
     if (confirm(`${player.name} を削除しますか？`)) {
+      AppStorage.createSnapshot(`${player.name} を削除する前`);
       AppStorage.deletePlayer(id);
       this.showToast(`${player.name} を削除しました`, 'info');
       this.renderPlayers();
     }
+  },
+
+  _appearsInRounds(id, rounds) {
+    return rounds.some(r => r.byePlayerId === id
+      || r.matches.some(m => m.player1Id === id || m.player2Id === id));
+  },
+
+  /** 途中棄権：過去の対局と相手の成績は残し、以後の対戦表から外す */
+  withdrawPlayer(id) {
+    const player = AppStorage.getPlayers().find(p => p.id === id);
+    if (!player || player.withdrawn) return;
+    const msg = `${player.name} は対戦表に入っているため、削除ではなく「途中棄権」にします。\n\n`
+      + '・過去の対局と、対戦相手の成績はそのまま残ります\n'
+      + '・以後の対戦表からは外れます\n\n'
+      + '途中棄権にしますか？';
+    if (!confirm(msg)) return;
+
+    AppStorage.createSnapshot(`${player.name} を途中棄権にする前`);
+    AppStorage.updatePlayer(id, { withdrawn: true });
+    this._rebuildRoundsWithout(player);
+    this.renderAll();
+  },
+
+  reinstatePlayer(id) {
+    const player = AppStorage.getPlayers().find(p => p.id === id);
+    if (!player || !player.withdrawn) return;
+    if (!confirm(`${player.name} の途中棄権を取り消しますか？\n（すでに組まれている回戦には入りません。対戦表を作り直すか、手動編集で追加してください）`)) return;
+    AppStorage.updatePlayer(id, { withdrawn: false });
+    this.renderAll();
+    this.showToast(`${player.name} の途中棄権を取り消しました`, 'info');
+  },
+
+  /**
+   * 結果をまだ入力していない回戦に棄権した選手が入っていれば、その回戦以降を組み直す。
+   * 結果入力済み（または確定済み）の最後の回戦までは、そのまま残す。
+   */
+  _rebuildRoundsWithout(player) {
+    const rounds = AppStorage.getRounds();
+    let keep = 0;
+    rounds.forEach((r, i) => { if (r.confirmed || r.matches.some(m => m.result)) keep = i + 1; });
+    const future = rounds.slice(keep);
+    if (!this._appearsInRounds(player.id, future)) {
+      this.showToast(`${player.name} を途中棄権にしました`, 'info');
+      return;
+    }
+
+    const from = future[0].roundNumber;
+    const ask = `第${from}回戦以降（結果が未入力の${future.length}回戦）に ${player.name} が入っています。\n`
+      + `これらの回戦を、${player.name} を除いて組み直しますか？\n\n`
+      + '（組み直さない場合は、手動編集で調整してください）';
+    if (!confirm(ask)) {
+      this.showToast(`${player.name} を途中棄権にしました`, 'info');
+      return;
+    }
+
+    const settings   = AppStorage.getSettings();
+    const allPlayers = AppStorage.getPlayers();
+    const active     = allPlayers.filter(p => !p.withdrawn);
+    const fixed      = rounds.slice(0, keep);
+    const opts = {
+      gradeAvoidLevel:  settings.gradeAvoidLevel  ?? 2,
+      rankBalanceLevel: settings.rankBalanceLevel ?? 2,
+      meanBalanceLevel: settings.meanBalanceLevel ?? 2,
+      assignSenteGote:  settings.assignSenteGote  ?? true,
+      strengthMode:     this.isRatingMode() ? 'rating' : 'rank',
+      numRounds:        rounds.length,
+      allPlayers,
+    };
+
+    let newRounds;
+    if ((settings.matchingFormat || 'random') === 'swiss') {
+      // スイスドローは成績に応じて次の1回戦だけを組む
+      const res = Matching.generateNextSwissRound(active, fixed, opts);
+      if (res.error) { this.showToast(res.error, 'error'); return; }
+      newRounds = [res.round];
+    } else {
+      const res = Matching.generateAllRounds(active, rounds.length, { ...opts, fixedRounds: fixed });
+      if (res.error) { this.showToast(res.error, 'error'); return; }
+      newRounds = res.rounds;
+    }
+
+    AppStorage.saveRounds([...fixed, ...newRounds]);
+    this.showToast(`${player.name} を途中棄権にし、第${from}回戦以降を組み直しました`, 'success');
   },
 
   playerSortKey: (() => {
@@ -580,6 +673,7 @@ const UI = {
 
   renderPlayers() {
     const players = AppStorage.getPlayers();
+    const rounds  = AppStorage.getRounds();
     const container = document.getElementById('player-list');
     const countEl = document.getElementById('player-count');
 
@@ -633,8 +727,8 @@ const UI = {
           </thead>
           <tbody>
             ${sorted.map(p => `
-              <tr>
-                <td class="player-name-cell">${this.escapeHtml(p.name)}</td>
+              <tr class="${p.withdrawn ? 'player-withdrawn' : ''}">
+                <td class="player-name-cell">${this.escapeHtml(p.name)}${p.withdrawn ? ' <span class="withdrawn-badge">棄権</span>' : ''}</td>
                 <td>${p.grade}年</td>
                 ${leagueMode ? '' : ratingMode
                   ? `<td>${Matching.hasNoRating(p)
@@ -645,9 +739,13 @@ const UI = {
                   <button class="btn-icon btn-edit" onclick="UI.editPlayer('${p.id}')" title="編集">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                   </button>
-                  <button class="btn-icon btn-delete" onclick="UI.deletePlayer('${p.id}')" title="削除">
+                  ${p.withdrawn ? `
+                  <button class="btn-icon btn-reinstate" onclick="UI.reinstatePlayer('${p.id}')" title="途中棄権を取り消す">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  </button>` : `
+                  <button class="btn-icon btn-delete" onclick="UI.deletePlayer('${p.id}')" title="${this._appearsInRounds(p.id, rounds) ? '途中棄権にする' : '削除'}">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                  </button>
+                  </button>`}
                 </td>
               </tr>
             `).join('')}
@@ -724,8 +822,9 @@ const UI = {
     });
 
     document.getElementById('clear-rounds-btn').addEventListener('click', () => {
-      if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。')) {
+      if (confirm('生成された対戦表をすべてクリアしますか？結果も失われます。\n（ヘッダーの「↩ 元に戻す」から復元できます）')) {
         if (this.editMode) this.exitEditMode(true);
+        AppStorage.createSnapshot('対戦表をクリアする前');
         AppStorage.saveRounds([]);
         this.renderMatchingResult();
         this.showToast('対戦表をクリアしました', 'info');
@@ -767,7 +866,9 @@ const UI = {
   },
 
   generateMatching() {
-    const players        = AppStorage.getPlayers();
+    // 途中棄権した選手は対戦表に入れない
+    const allPlayers     = AppStorage.getPlayers();
+    const players        = allPlayers.filter(p => !p.withdrawn);
     const numRounds        = parseInt(document.getElementById('num-rounds').value);
     const gradeAvoidLevel  = parseInt(document.getElementById('grade-avoid-weight').value);
     const rankBalanceLevel = parseInt(document.getElementById('rank-balance-weight').value);
@@ -780,6 +881,16 @@ const UI = {
       return;
     }
 
+    // ランダム方式は全回戦を作り直すため、入力済みの結果が消える
+    if (matchingFormat !== 'swiss') {
+      const existing = AppStorage.getRounds();
+      const entered  = existing.reduce((n, r) => n + r.matches.filter(m => m.result).length, 0);
+      if (entered > 0) {
+        if (!confirm(`入力済みの結果が${entered}件あります。対戦表を作り直すと、すべて消えます。\n作り直しますか？（ヘッダーの「↩ 元に戻す」から復元できます）`)) return;
+      }
+      if (existing.length > 0) AppStorage.createSnapshot('対戦表を作り直す前');
+    }
+
     const btn = document.getElementById('generate-btn');
     btn.textContent = '生成中...';
     btn.disabled = true;
@@ -787,7 +898,7 @@ const UI = {
     setTimeout(() => {
       const settings = AppStorage.getSettings();
       const strengthMode = this.isRatingMode() ? 'rating' : 'rank';
-      const opts = { gradeAvoidLevel, rankBalanceLevel, meanBalanceLevel, strengthMode, assignSenteGote, numRounds };
+      const opts = { gradeAvoidLevel, rankBalanceLevel, meanBalanceLevel, strengthMode, assignSenteGote, numRounds, allPlayers };
 
       if (matchingFormat === 'swiss') {
         this._generateSwissRound(players, numRounds, opts);
@@ -898,6 +1009,7 @@ const UI = {
     this.editMode = true;
     this.editSelected = null;
     this._editSnapshot = JSON.parse(JSON.stringify(AppStorage.getRounds()));
+    AppStorage.createSnapshot('手動編集の前');
     document.getElementById('edit-matches-btn').classList.add('hidden');
     document.getElementById('edit-mode-bar').classList.remove('hidden');
     this.renderMatchingResult();
@@ -1397,7 +1509,12 @@ const UI = {
     }
 
     const standings = Matching.calculateStandings(players, rounds, true);
+    const indexSummary = Matching.summarizeIndices(standings);
     const showPt = this.standingsOpts.showPoints;
+    const fmt1 = v => v == null ? '—' : (Math.round(v * 10) / 10).toFixed(1);
+    const indexCell = (value, rank) => rank == null
+      ? '<td class="index-cell">—</td>'
+      : `<td class="index-cell">${value}<span class="index-rank">${rank}位</span></td>`;
 
     // 完了数
     let totalMatches = 0, completedMatches = 0;
@@ -1430,6 +1547,8 @@ const UI = {
               <th>不戦勝</th>
               <th>勝率</th>
               ${showPt ? '<th>Pt</th>' : ''}
+              <th title="結果が入力された対局の相手の Pt の合計">ソルコフ</th>
+              <th title="ソルコフから自分の敗数を引いた値">ソルコフ−敗数</th>
             </tr>
           </thead>
           <tbody>
@@ -1438,7 +1557,7 @@ const UI = {
                 <td class="position-cell">
                   ${s.position <= 3 ? `<span class="medal medal-${s.position}">${['🥇','🥈','🥉'][s.position-1]}</span>` : s.position}
                 </td>
-                <td class="name-cell name-cell-link" onclick="UI.showPlayerDetail('${s.id}')">${this.escapeHtml(s.name)} <span class="name-cell-hint">›</span></td>
+                <td class="name-cell name-cell-link" onclick="UI.showPlayerDetail('${s.id}')">${this.escapeHtml(s.name)}${s.withdrawn ? ' <span class="withdrawn-badge">棄権</span>' : ''} <span class="name-cell-hint">›</span></td>
                 <td>${s.grade}年</td>
                 <td class="win-cell">${s.wins}</td>
                 <td class="loss-cell">${s.losses}</td>
@@ -1446,9 +1565,18 @@ const UI = {
                 <td>${s.byes}</td>
                 <td>${s.winRate.toFixed(1)}%</td>
                 ${showPt ? `<td class="points-cell">${s.points}</td>` : ''}
+                ${indexCell(s.solkoff, s.solkoffRank)}
+                ${indexCell(s.solkoffMinusLosses, s.solkoffMinusLossesRank)}
               </tr>
             `).join('')}
           </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="${showPt ? 9 : 8}" class="index-summary-label">平均 ／ 標準偏差</td>
+              <td class="index-cell">${fmt1(indexSummary.solkoff.mean)}<span class="index-rank">σ ${fmt1(indexSummary.solkoff.sd)}</span></td>
+              <td class="index-cell">${fmt1(indexSummary.solkoffMinusLosses.mean)}<span class="index-rank">σ ${fmt1(indexSummary.solkoffMinusLosses.sd)}</span></td>
+            </tr>
+          </tfoot>
         </table>
       </div>`;
 
@@ -1487,6 +1615,62 @@ const UI = {
   // ============================================
   // 個人成績モーダル
   // ============================================
+
+  // ============================================
+  // 元に戻す（変更履歴）
+  // ============================================
+
+  async showHistory() {
+    const modal = document.getElementById('history-modal');
+    const list  = document.getElementById('history-list');
+    if (!modal.dataset.bound) {
+      modal.dataset.bound = '1';
+      document.getElementById('history-close').addEventListener('click', () => modal.classList.add('hidden'));
+      modal.addEventListener('click', e => { if (e.target === modal) modal.classList.add('hidden'); });
+    }
+    list.innerHTML = '<p class="history-empty">読み込み中...</p>';
+    modal.classList.remove('hidden');
+
+    let snapshots;
+    try {
+      snapshots = await AppStorage.listSnapshots();
+    } catch (err) {
+      list.innerHTML = `<p class="history-empty">${this.escapeHtml(err.message)}（オフラインの可能性があります）</p>`;
+      return;
+    }
+    if (snapshots.length === 0) {
+      list.innerHTML = '<p class="history-empty">まだ保存された状態はありません</p>';
+      return;
+    }
+
+    this._historySnapshots = snapshots;
+    list.innerHTML = snapshots.map((snap, i) => {
+      const d = snap.data || {};
+      const results = (d.rounds || []).reduce((n, r) => n + (r.matches || []).filter(m => m.result).length, 0);
+      const when = new Date(snap.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="history-item">
+          <div class="history-info">
+            <span class="history-label">${this.escapeHtml(snap.label)}</span>
+            <span class="history-meta">${this.escapeHtml(when)}・選手${(d.players || []).length}人・${(d.rounds || []).length}回戦・結果${results}件</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="UI.restoreHistory(${i})">この状態に戻す</button>
+        </div>`;
+    }).join('');
+  },
+
+  restoreHistory(index) {
+    const snap = (this._historySnapshots || [])[index];
+    if (!snap) return;
+    if (!confirm(`「${snap.label}」の状態に戻しますか？\n今の状態も履歴に保存されるので、あとから戻せます。`)) return;
+    if (this.editMode) this.exitEditMode(true);
+    AppStorage.restoreSnapshot(snap);
+    document.getElementById('history-modal').classList.add('hidden');
+    this.applyLeagueMode();
+    this.loadSettings();
+    this.renderAll();
+    this.showToast('以前の状態に戻しました', 'success');
+  },
 
   _bindPlayerDetailModal() {
     document.getElementById('player-detail-close').addEventListener('click', () => {
@@ -1689,8 +1873,8 @@ const UI = {
       this.showToast('すべての項目を入力してください', 'error');
       return;
     }
-    if (next.length < 6) {
-      this.showToast('新しいパスワードは6文字以上にしてください', 'error');
+    if (next.length < 8) {
+      this.showToast('新しいパスワードは8文字以上にしてください', 'error');
       return;
     }
     if (next !== confirm) {
@@ -1724,11 +1908,13 @@ const UI = {
         return;
       }
       const standings = Matching.calculateStandings(players, rounds, true);
-      PDF.exportStandings(standings, { showPoints: this.standingsOpts.showPoints });
+      const indexSummary = Matching.summarizeIndices(standings);
+      PDF.exportStandings(standings, { showPoints: this.standingsOpts.showPoints, indexSummary });
     });
 
     document.getElementById('reset-all-btn').addEventListener('click', () => {
-      if (confirm('すべてのデータをリセットしますか？この操作は元に戻せません。')) {
+      if (confirm('すべてのデータをリセットしますか？\n（ヘッダーの「↩ 元に戻す」から復元できます）')) {
+        AppStorage.createSnapshot('全データリセットの前');
         AppStorage.resetAll();
         this.renderPlayers();
         this.renderMatchingResult();

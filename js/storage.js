@@ -103,15 +103,13 @@ const AppStorage = {
     if (!supabaseClient) throw new Error('Supabase未接続');
     const uname = username.trim();
 
-    this._checkLoginRateLimit(uname);
-
+    // 試行回数の制限はサーバー側（同じユーザー名で15分間に10回失敗すると15分間ロック）
     const { data, error } = await supabaseClient.rpc('auth_login', {
       p_username: uname,
       p_password: password,
     });
 
     if (error) {
-      this._recordLoginFailure(uname);
       // サーバーが返すエラーメッセージ名を意味のある日本語に翻訳
       const msg = (error.message || '').toLowerCase();
       if (msg.includes('invalid_credentials')) {
@@ -121,12 +119,14 @@ const AppStorage = {
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) {
-      this._recordLoginFailure(uname);
+    if (row && row.status === 'locked') {
+      const minutes = Math.max(1, Math.ceil((row.retry_after_seconds || 900) / 60));
+      throw new Error(`ログインの失敗が続いたため、一時的にログインできません。約${minutes}分後に再度お試しください。`);
+    }
+    if (!row || !row.account_id || !row.session_token || (row.status && row.status !== 'ok')) {
       throw new Error('ユーザー名またはパスワードが違います');
     }
 
-    this._clearLoginFailures(uname);
     this.saveSession(row.account_id, row.account_username, row.session_token);
     return { id: row.account_id, username: row.account_username };
   },
@@ -139,8 +139,8 @@ const AppStorage = {
     if (!/^[A-Za-z0-9_\-]{4,32}$/.test(uname)) {
       throw new Error('ユーザー名は半角英数字・ハイフン・アンダースコアで4〜32文字にしてください');
     }
-    if (password.length < 6 || password.length > 128) {
-      throw new Error('パスワードは6〜128文字にしてください');
+    if (password.length < 8 || password.length > 128) {
+      throw new Error('パスワードは8〜128文字にしてください');
     }
     if (this._isCommonPassword(password)) {
       throw new Error('このパスワードは推測されやすいため使用できません');
@@ -160,7 +160,7 @@ const AppStorage = {
         throw new Error('ユーザー名の形式が正しくありません');
       }
       if (msg.includes('weak_password')) {
-        throw new Error('パスワードは6文字以上にしてください');
+        throw new Error('パスワードは8文字以上にしてください');
       }
       throw new Error('アカウント作成に失敗しました');
     }
@@ -176,8 +176,8 @@ const AppStorage = {
     if (!supabaseClient) throw new Error('Supabase未接続');
     const session = this.getSession();
     if (!session) throw new Error('ログインが必要です');
-    if (newPassword.length < 6 || newPassword.length > 128) {
-      throw new Error('新しいパスワードは6〜128文字にしてください');
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      throw new Error('新しいパスワードは8〜128文字にしてください');
     }
     if (this._isCommonPassword(newPassword)) {
       throw new Error('このパスワードは推測されやすいため使用できません');
@@ -198,47 +198,6 @@ const AppStorage = {
       }
       throw new Error('パスワード変更に失敗しました');
     }
-  },
-
-  // ============================================
-  // ログイン試行制限（クライアント側ベストエフォート）
-  // ============================================
-  _loginFailKey(username) {
-    return 'shogi_loginfail_' + (username || '').toLowerCase();
-  },
-  _checkLoginRateLimit(username) {
-    try {
-      const raw = localStorage.getItem(this._loginFailKey(username));
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      const WINDOW = 15 * 60 * 1000; // 15分
-      const MAX    = 5;
-      const now    = Date.now();
-      if (now - (data.first || 0) > WINDOW) return;  // 期限切れ
-      if ((data.count || 0) >= MAX) {
-        const wait = Math.ceil((WINDOW - (now - data.first)) / 60000);
-        throw new Error(`ログイン試行回数が上限を超えました。約${wait}分後に再度お試しください。`);
-      }
-    } catch (e) {
-      if (e.message && e.message.includes('ログイン試行')) throw e;
-    }
-  },
-  _recordLoginFailure(username) {
-    try {
-      const key = this._loginFailKey(username);
-      const raw = localStorage.getItem(key);
-      const now = Date.now();
-      const data = raw ? JSON.parse(raw) : { count: 0, first: now };
-      if (!data.first || now - data.first > 15 * 60 * 1000) {
-        data.first = now;
-        data.count = 0;
-      }
-      data.count = (data.count || 0) + 1;
-      localStorage.setItem(key, JSON.stringify(data));
-    } catch {}
-  },
-  _clearLoginFailures(username) {
-    try { localStorage.removeItem(this._loginFailKey(username)); } catch {}
   },
 
   /** よく使われる脆弱なパスワードの簡易ブロックリスト */
@@ -425,6 +384,7 @@ const AppStorage = {
     return {
       id: p.id, name: p.name, grade: p.grade, rank: p.rank,
       rating: p.rating ?? null,
+      withdrawn: !!p.withdrawn,
       room_id: this.roomId,
     };
   },
@@ -507,6 +467,7 @@ const AppStorage = {
         data.players = remotePlayers.map(p => ({
           id: p.id, name: p.name, grade: p.grade, rank: p.rank,
           rating: p.rating == null ? null : Number(p.rating),
+          withdrawn: !!p.withdrawn,
         }));
       } else if (data.players.length > 0) {
         this._remote('選手', () => supabaseClient.from('players').upsert(data.players.map(p => this._playerRow(p))));
@@ -725,6 +686,92 @@ const AppStorage = {
       const row = this._settingsRow(data.settings);
       this._remote('設定', () => supabaseClient.from('settings').upsert(row));
     }
+  },
+
+  // ============================================
+  // 元に戻す（スナップショット）
+  // ============================================
+
+  /** 部屋の現在の状態（選手・対戦表・共有設定・リーグ戦） */
+  _snapshotData() {
+    const data = this.loadAll();
+    return {
+      players:  data.players,
+      rounds:   data.rounds,
+      settings: { numRounds: data.settings.numRounds, strengthMode: data.settings.strengthMode || 'rank' },
+      league:   data.league,
+    };
+  },
+
+  /**
+   * 取り返しのつかない操作の直前に、現在の状態をサーバーに保存する（部屋ごとに最新20件）。
+   * 書き込みキューに積むので、直後の上書きより必ず先に保存される。
+   */
+  createSnapshot(label) {
+    const data = this._snapshotData();
+    if (data.players.length === 0 && data.rounds.length === 0 && !this._leagueHasContent(data.league)) return;
+    this._remote('元に戻す用の保存', () => supabaseClient.from('room_snapshots').insert({
+      room_id: this.roomId, label: String(label).slice(0, 100), data,
+    }));
+  },
+
+  async listSnapshots() {
+    if (!supabaseClient || !this.roomId) return [];
+    await this._writeQueue;
+    const { data, error } = await supabaseClient.from('room_snapshots')
+      .select('id, label, data, created_at')
+      .eq('room_id', this.roomId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) throw new Error('履歴の取得に失敗しました');
+    return data || [];
+  },
+
+  /** スナップショットの状態に戻す（戻す前の状態も保存するので、復元自体も元に戻せる） */
+  restoreSnapshot(snapshot) {
+    const snap = snapshot.data || {};
+    this.createSnapshot('復元する前の状態');
+
+    const data = this.loadAll();
+    data.players = snap.players || [];
+    data.rounds  = snap.rounds  || [];
+    data.league  = { ...this.getDefaultLeague(), ...(snap.league || {}) };
+    if (snap.settings) {
+      data.settings.numRounds    = snap.settings.numRounds ?? data.settings.numRounds;
+      data.settings.strengthMode = snap.settings.strengthMode === 'rating' ? 'rating' : 'rank';
+    }
+    this._saveLocal(data);
+
+    const players  = data.players.map(p => this._playerRow(p));
+    const rounds   = data.rounds.map(r => this._roundRow(r));
+    const maxRound = data.rounds.reduce((m, r) => Math.max(m, r.roundNumber), 0);
+    const settings = this._settingsRow(data.settings);
+    const league   = data.league;
+    this._remote('復元', async () => {
+      // 選手：スナップショットに無い選手を削除してから書き込む
+      const ids = players.map(p => p.id);
+      let del = supabaseClient.from('players').delete().eq('room_id', this.roomId);
+      if (ids.length > 0) del = del.not('id', 'in', `(${ids.map(id => `"${id}"`).join(',')})`);
+      let res = await del;
+      if (res.error) return res;
+      if (players.length > 0) {
+        res = await supabaseClient.from('players').upsert(players);
+        if (res.error) return res;
+      }
+      // 対戦表
+      if (rounds.length > 0) {
+        res = await supabaseClient.from('rounds').upsert(rounds);
+        if (res.error) return res;
+      }
+      res = await supabaseClient.from('rounds').delete().eq('room_id', this.roomId).gt('round_number', maxRound);
+      if (res.error) return res;
+      // 設定・リーグ戦
+      res = await supabaseClient.from('settings').upsert(settings);
+      if (res.error) return res;
+      return supabaseClient.from('leagues').upsert({
+        room_id: this.roomId, data: league, updated_at: new Date().toISOString(),
+      });
+    });
   },
 
   resetAll() {

@@ -87,9 +87,9 @@
         <input type="text" id="register-username" class="form-input" placeholder="ユーザー名" autocomplete="username" required maxlength="32" pattern="[A-Za-z0-9_\-]{4,32}" title="半角英数字・ハイフン・アンダースコアで4〜32文字">
       </div>
       <div class="form-group">
-        <label class="form-label" for="register-password">パスワード <span class="pw-hint">（6文字以上）</span></label>
+        <label class="form-label" for="register-password">パスワード <span class="pw-hint">（8文字以上）</span></label>
         <div class="pw-input-wrap">
-          <input type="password" id="register-password" class="form-input" placeholder="パスワード" autocomplete="new-password" required maxlength="128" minlength="6">
+          <input type="password" id="register-password" class="form-input" placeholder="パスワード" autocomplete="new-password" required maxlength="128" minlength="8">
           <button type="button" class="toggle-pw" data-target="register-password">👁</button>
         </div>
       </div>
@@ -159,6 +159,7 @@
         <span class="room-info-label">部屋:</span>
         <span id="room-code-display" class="room-code-display"></span>
         <button id="change-room-btn" class="btn-change-room" title="部屋を変更">変更</button>
+        <button id="history-btn" class="btn-change-room" title="以前の状態に戻す">↩ 元に戻す</button>
       </div>
       <div id="user-info-bar" class="user-info-bar hidden">
         <span class="user-icon">👤</span>
@@ -380,7 +381,7 @@
     <div class="section-header">
       <h2 class="section-title"><span>🏆</span> 成績順位表</h2>
       <div class="standings-header-actions">
-        <button class="btn btn-ghost btn-sm" id="pt-info-btn" title="Pt算出方法">Pt算出方法 ℹ</button>
+        <button class="btn btn-ghost btn-sm" id="pt-info-btn" title="Pt・ソルコフの算出方法">算出方法 ℹ</button>
         <button class="btn btn-ghost btn-sm toggle-active" id="toggle-pt-btn">Pt 表示中</button>
         <button class="btn btn-secondary" id="export-standings-btn">
           📄 成績表PDF出力
@@ -414,9 +415,9 @@
           </div>
         </div>
         <div class="pw-field">
-          <label class="form-label" for="pw-new">新しいパスワード <span class="pw-hint">（6文字以上）</span></label>
+          <label class="form-label" for="pw-new">新しいパスワード <span class="pw-hint">（8文字以上）</span></label>
           <div class="pw-input-wrap">
-            <input type="password" id="pw-new" class="form-input" placeholder="新しいパスワード" required maxlength="128" minlength="6">
+            <input type="password" id="pw-new" class="form-input" placeholder="新しいパスワード" required maxlength="128" minlength="8">
             <button type="button" class="toggle-pw" data-target="pw-new">👁</button>
           </div>
         </div>
@@ -453,6 +454,23 @@
       <tr><td>敗北</td><td class="pt-val">+0 Pt</td></tr>
     </table>
     <p class="pt-info-note">順位はPt降順 → (勝+不戦勝)降順 → 勝率降順で決定します。</p>
+
+    <h3 class="pt-info-title">ソルコフ・ソルコフ−敗数</h3>
+    <table class="pt-info-table">
+      <tr><td>ソルコフ</td><td>結果が入力された対局の、相手の Pt の合計（不戦勝の回戦は相手がいないので含めない）</td></tr>
+      <tr><td>ソルコフ−敗数</td><td>ソルコフから自分の敗数を引いた値</td></tr>
+    </table>
+    <p class="pt-info-note">順位は1局以上対局した選手の中での順位で、同じ値は同順位です。表の最下行は平均と標準偏差（σ、母標準偏差）です。順位表の並びには使いません。</p>
+  </div>
+</div>
+
+<!-- 元に戻す（変更履歴） -->
+<div id="history-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card">
+    <button class="modal-close" id="history-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">元に戻す</h3>
+    <p class="pt-info-note">対戦表の作り直し・クリア・手動編集・途中棄権・全データリセットなどの直前の状態を、部屋ごとに最新20件まで保存しています。</p>
+    <div id="history-list" class="history-list"></div>
   </div>
 </div>
 

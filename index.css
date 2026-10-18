@@ -3009,3 +3009,75 @@ body::before {
 .opp-strength-table .opp-muted { color: var(--text-muted); }
 .opp-strength-table .opp-diff-up   { color: var(--accent-red); }
 .opp-strength-table .opp-diff-down { color: var(--accent-blue); }
+
+/* --- 途中棄権 --- */
+.withdrawn-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  vertical-align: middle;
+}
+.player-withdrawn td { opacity: 0.6; }
+.player-withdrawn td.actions-cell { opacity: 1; }
+.btn-reinstate:hover {
+  background: rgba(76, 231, 160, 0.15);
+  color: var(--accent-green);
+}
+
+/* --- 成績表：ソルコフ指標 --- */
+.standings-table .index-cell {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.standings-table .index-rank {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.standings-table tfoot td {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.standings-table .index-summary-label {
+  text-align: right;
+  color: var(--text-muted);
+}
+.pt-info-table td:first-child { white-space: nowrap; vertical-align: top; }
+
+/* --- 元に戻す（変更履歴） --- */
+.history-card {
+  max-width: 480px;
+  width: calc(100% - 32px);
+  padding: 28px 24px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.history-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.history-label { font-size: 14px; color: var(--text-primary); }
+.history-meta  { font-size: 12px; color: var(--text-muted); }
+.history-item .btn { flex-shrink: 0; }
+.history-empty { font-size: 13px; color: var(--text-muted); }

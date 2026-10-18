@@ -646,7 +646,8 @@ const League = {
     const hasResults = Object.values(term.matches || {})
       .some(arr => (arr || []).some(m => m.result));
     if (hasResults) {
-      if (!confirm('総当たり表を再生成しますか？\n入力済みの対局結果はすべて消去されます。')) return;
+      if (!confirm('総当たり表を再生成しますか？\n入力済みの対局結果はすべて消去されます。\n（ヘッダーの「↩ 元に戻す」から復元できます）')) return;
+      AppStorage.createSnapshot('リーグ戦の総当たり表を再生成する前');
     }
 
     (league.classes || []).forEach(cls => {
@@ -875,6 +876,7 @@ const League = {
     let confirmMsg = `第${league.currentTerm}期を確定し、昇降級を適用して第${league.currentTerm + 1}期に進みますか？`;
     if (pending > 0) confirmMsg = `未入力の対局が${pending}局あります。\n` + confirmMsg;
     if (!confirm(confirmMsg)) return;
+    AppStorage.createSnapshot(`リーグ戦 第${league.currentTerm}期を確定する前`);
 
     // 昇降級を計算
     const changes = [];

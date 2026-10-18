@@ -111,6 +111,8 @@ const Matching = {
    * @returns {Array|null} ラウンド配列 or null（生成不可）
    */
   generateAllRounds(inputPlayers, numRounds, options = {}) {
+    // fixedRounds：残す回戦（結果入力済みなど）。指定するとその続きの回戦だけを生成して返す
+    const fixedRounds = options.fixedRounds || [];
     const prep = this.prepareStrength(inputPlayers, options);
     if (prep.error) return { error: prep.error };
     const players   = prep.players;
@@ -124,10 +126,13 @@ const Matching = {
     if (players.length < 2) {
       return { error: 'プレイヤーが2人以上必要です。' };
     }
-    if (numRounds > players.length - 1) {
+    if (fixedRounds.length === 0 && numRounds > players.length - 1) {
       return {
         error: `${players.length}人の場合、最大${players.length - 1}回戦までです（現在: ${numRounds}回戦）。`
       };
+    }
+    if (fixedRounds.length >= numRounds) {
+      return { rounds: [] };
     }
 
     const matchHistory = new Set();
@@ -157,9 +162,28 @@ const Matching = {
       this._resetMeanHistory(ctx, players);
       allRounds.length = 0;
 
+      // 残す回戦の履歴を反映（棄権した選手との対局は、再戦防止のみに使う）
+      fixedRounds.forEach(fr => {
+        fr.matches.forEach(match => {
+          matchHistory.add(this.makeMatchKey(match.player1Id, match.player2Id));
+          const p1 = players.find(p => p.id === match.player1Id);
+          const p2 = players.find(p => p.id === match.player2Id);
+          if (p1 && p2) {
+            rankHistory[p1.id][this.bandOf(p2)]++;
+            rankHistory[p2.id][this.bandOf(p1)]++;
+            gradeHistory[p1.id][p2.grade] = (gradeHistory[p1.id][p2.grade] ?? 0) + 1;
+            gradeHistory[p2.id][p1.grade] = (gradeHistory[p2.id][p1.grade] ?? 0) + 1;
+            this._recordMeanHistory(ctx, p1.id, p2.id);
+          }
+          if (match.player1Id in senteHistory) senteHistory[match.player1Id]++;
+        });
+        if (fr.byePlayerId && fr.byePlayerId in byeCounts) byeCounts[fr.byePlayerId]++;
+      });
+      const baseSente = { ...senteHistory };
+
       let success = true;
 
-      for (let round = 0; round < numRounds; round++) {
+      for (let round = fixedRounds.length; round < numRounds; round++) {
         const result = this.generateSingleRound(
           players, matchHistory, rankHistory, gradeHistory, byeCounts, round, gradeWeight, rankWeight, ctx
         );
@@ -197,11 +221,10 @@ const Matching = {
 
       if (success) {
         // 回戦をまたいだ偏りを入れ替えで解消（先後の割り当てより前に行う）
-        this._optimizeSchedule(allRounds, players, gradeWeight, rankWeight, ctx);
+        this._optimizeSchedule(allRounds, players, gradeWeight, rankWeight, ctx, 400, fixedRounds);
         if (assignSenteGote) {
           // 入れ替えで先後の初期割り当てが崩れるため、回数に応じて振り直してから最適化する
-          const sente = {};
-          players.forEach(p => { sente[p.id] = 0; });
+          const sente = { ...baseSente };
           allRounds.forEach(r => {
             r.matches = this._assignSenteGote(r.matches, sente);
             r.matches.forEach(m => { sente[m.player1Id]++; });
@@ -213,7 +236,7 @@ const Matching = {
         // 例：6回戦・1回不戦勝 → 5局のうち先手2回・後手3回。
         // この目標は不戦勝のない選手の均等化よりも優先される（重み付け）。
         if (assignSenteGote) {
-          this._optimizeSenteGote(allRounds, players, byeCounts, numRounds);
+          this._optimizeSenteGote(allRounds, players, byeCounts, numRounds, baseSente);
         }
         return { rounds: allRounds };
       }
@@ -282,8 +305,9 @@ const Matching = {
     const pointsMap = {};
     players.forEach(p => { pointsMap[p.id] = 0; });
     if (existingRounds.length > 0) {
-      this.calculateStandings(players, existingRounds, true)
-        .forEach(s => { pointsMap[s.id] = s.points; });
+      // 棄権した選手との対局も勝ち点に含めるため、全選手（options.allPlayers）で計算する
+      this.calculateStandings(options.allPlayers || players, existingRounds, true)
+        .forEach(s => { if (s.id in pointsMap) pointsMap[s.id] = s.points; });
     }
 
     // 複数試行で最良ペアリングを選択
@@ -359,7 +383,7 @@ const Matching = {
    *   - ランダム初期化からの多重リスタート
    * を組み合わせて最良解を探索する。
    */
-  _optimizeSenteGote(rounds, players, byeCounts, numRounds) {
+  _optimizeSenteGote(rounds, players, byeCounts, numRounds, baseSente = null) {
     // 目標先手回数
     const target = {};
     const isBye  = {};
@@ -393,8 +417,9 @@ const Matching = {
 
     // senteCount を集計
     const buildSenteCount = () => {
+      // baseSente：残す回戦（入れ替え対象外）での先手回数
       const sc = {};
-      players.forEach(p => { sc[p.id] = 0; });
+      players.forEach(p => { sc[p.id] = baseSente?.[p.id] ?? 0; });
       allMatches.forEach(m => { sc[m.player1Id]++; });
       return sc;
     };
@@ -782,7 +807,7 @@ const Matching = {
    * 入れ替えで変わるのは4人分だけなので、その4人の差分だけを計算する。
    * 開始点（貪欲法の結果）と探索順がランダムなので、仕上げ後もランダム性は保たれる。
    */
-  _optimizeSchedule(rounds, players, gradeWeight, rankWeight, ctx, timeBudgetMs = 400) {
+  _optimizeSchedule(rounds, players, gradeWeight, rankWeight, ctx, timeBudgetMs = 400, fixedRounds = []) {
     const byId = {};
     players.forEach(p => { byId[p.id] = p; });
 
@@ -818,11 +843,14 @@ const Matching = {
       return c;
     };
 
-    const slots = [];   // [roundIndex, matchIndex]
-    rounds.forEach((r, ri) => r.matches.forEach((m, mi) => {
-      link(byId[m.player1Id], byId[m.player2Id], +1);
-      slots.push([ri, mi]);
+    // 残す回戦は入れ替えないが、偏りと再戦の判定には含める
+    const fixedLinks = [];
+    fixedRounds.forEach(r => r.matches.forEach(m => {
+      if (byId[m.player1Id] && byId[m.player2Id]) fixedLinks.push([byId[m.player1Id], byId[m.player2Id]]);
     }));
+    const linkFixed = () => fixedLinks.forEach(([a, b]) => link(a, b, +1));
+    linkFixed();
+    rounds.forEach(r => r.matches.forEach(m => link(byId[m.player1Id], byId[m.player2Id], +1)));
 
     const deadline = Date.now() + timeBudgetMs;
 
@@ -866,6 +894,7 @@ const Matching = {
       rounds.forEach((r, ri) => { r.matches = bestSnap[ri]; });
       players.forEach(p => { state[p.id] = { grade: {}, band: {}, sum: 0, games: 0 }; });
       pairCount.clear();
+      linkFixed();
       rounds.forEach(r => r.matches.forEach(m => link(byId[m.player1Id], byId[m.player2Id], +1)));
     }
 
@@ -955,7 +984,9 @@ const Matching = {
         byes: 0,
         played: 0,
         winRate: 0,
-        points: 0 // 勝ち=2点, 引き分け=1点, BYE勝ち=2点
+        points: 0, // 勝ち=2点, 引き分け=1点, BYE勝ち=2点
+        withdrawn: !!p.withdrawn,
+        opponents: [],   // 結果が入力された対局の相手ID（ソルコフ用）
       };
     });
 
@@ -969,6 +1000,8 @@ const Matching = {
 
         s1.played++;
         s2.played++;
+        s1.opponents.push(s2.id);
+        s2.opponents.push(s1.id);
 
         if (match.result === 'player1') {
           s1.wins++;
@@ -999,6 +1032,13 @@ const Matching = {
       s.winRate = totalGames > 0 ? (s.wins / totalGames * 100) : 0;
     });
 
+    // ソルコフ：結果が入力された対局の相手の勝ち点（Pt）の合計（不戦勝の回戦は相手がいないので含めない）
+    // ソルコフ−敗数：ソルコフから自分の敗数を引いた値
+    Object.values(stats).forEach(s => {
+      s.solkoff = s.opponents.reduce((sum, id) => sum + stats[id].points, 0);
+      s.solkoffMinusLosses = s.solkoff - s.losses;
+    });
+
     // ソート: ポイント降順 → (勝+不戦勝)降順 → 勝率降順
     const sorted = Object.values(stats).sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
@@ -1021,5 +1061,26 @@ const Matching = {
     });
 
     return sorted;
+  },
+
+  /**
+   * 指標（ソルコフ・ソルコフ−敗数）の順位・平均・標準偏差。
+   * 対象は1局以上対局した選手。順位は値の大きい順で、同じ値は同順位（1, 1, 3…）。
+   * 標準偏差は対象選手全体の母標準偏差。
+   * 各選手に solkoffRank / solkoffMinusLossesRank を書き込み、集計を返す。
+   */
+  summarizeIndices(standings) {
+    const summary = {};
+    for (const key of ['solkoff', 'solkoffMinusLosses']) {
+      const targets = standings.filter(s => s.played > 0);
+      const values  = targets.map(s => s[key]);
+      standings.forEach(s => { s[key + 'Rank'] = null; });
+      targets.forEach(s => { s[key + 'Rank'] = 1 + values.filter(v => v > s[key]).length; });
+      const n = values.length;
+      const mean = n > 0 ? values.reduce((a, b) => a + b, 0) / n : null;
+      const sd   = n > 0 ? Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / n) : null;
+      summary[key] = { mean, sd, count: n };
+    }
+    return summary;
   }
 };

@@ -8,10 +8,11 @@ const path = require('path');
 const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'storage.js'), 'utf8');
 
 // ---- 疑似DB（サーバー側の挙動を再現） ----
-const db = { players: [], rounds: [], settings: [], leagues: [] };
+const db = { players: [], rounds: [], settings: [], leagues: [], room_snapshots: [] };
+let snapshotSeq = 0;
 const listeners = [];
 const clone = x => JSON.parse(JSON.stringify(x));
-const pk = { players: r => r.id, rounds: r => r.room_id + '#' + r.round_number, settings: r => r.id, leagues: r => r.room_id };
+const pk = { players: r => r.id, rounds: r => r.room_id + '#' + r.round_number, settings: r => r.id, leagues: r => r.room_id, room_snapshots: r => r.id };
 
 function query(table) {
   const filters = [];
@@ -20,7 +21,18 @@ function query(table) {
     select() { return q; },
     eq(c, v) { filters.push(r => r[c] === v); return q; },
     gt(c, v) { filters.push(r => r[c] > v); return q; },
-    order(c) { q._order = c; return q; },
+    not(c, op, list) {
+      const values = list.replace(/^\(|\)$/g, '').split(',').map(v => v.replace(/^"|"$/g, ''));
+      filters.push(r => !values.includes(r[c]));
+      return q;
+    },
+    order(c, opts) { q._order = c; q._desc = opts && opts.ascending === false; return q; },
+    limit() { return q; },
+    insert(rows) {
+      q._op = 'upsert';
+      q._rows = [].concat(rows).map(r => ({ ...r, id: ++snapshotSeq, created_at: new Date(Date.now() + snapshotSeq).toISOString() }));
+      return q;
+    },
     maybeSingle() { q._single = true; return q; },
     upsert(rows) { q._op = 'upsert'; q._rows = [].concat(rows); return q; },
     delete() { q._op = 'delete'; return q; },
@@ -36,7 +48,7 @@ function query(table) {
         }
         if (q._op === 'delete') { db[table] = db[table].filter(r => !match(r)); return { error: null }; }
         let rows = clone(db[table].filter(match));
-        if (q._order) rows.sort((a, b) => a[q._order] - b[q._order]);
+        if (q._order) rows.sort((a, b) => (a[q._order] > b[q._order] ? 1 : a[q._order] < b[q._order] ? -1 : 0) * (q._desc ? -1 : 1));
         return { data: q._single ? (rows[0] || null) : rows, error: null };
       }).then(res, rej);
     },
@@ -140,4 +152,42 @@ test('2台の端末で同時に入力しても、両方の結果が残り全端�
   await sleep(600);
   assert.equal(db.rounds.length, 0);
   assert.equal(B.AppStorage.getRounds().length, 0, '対戦表のクリアが他の端末にも反映');
+});
+
+test('途中棄権が他の端末に反映され、元に戻すで全端末が以前の状態に戻る', async () => {
+  const A = makeDevice('A');
+  await sleep(50);
+  ['q1', 'q2', 'q3', 'q4'].forEach(n => A.AppStorage.addPlayer({ name: n, grade: 1, rank: 'B' }));
+  const ps = A.AppStorage.getPlayers();
+  A.AppStorage.saveRounds([{ roundNumber: 1, byePlayerId: null, confirmed: false, matches: [
+    { player1Id: ps[0].id, player2Id: ps[1].id, result: 'player1' },
+    { player1Id: ps[2].id, player2Id: ps[3].id, result: null },
+  ] }]);
+  await sleep(100);
+  const B = makeDevice('B');
+  await sleep(100);
+
+  // 途中棄権
+  A.AppStorage.updatePlayer(ps[1].id, { withdrawn: true });
+  await sleep(600);
+  assert.equal(B.AppStorage.getPlayers().find(p => p.id === ps[1].id).withdrawn, true, '途中棄権がBにも反映');
+
+  // クリアする前に保存 → クリア → 元に戻す
+  A.AppStorage.createSnapshot('対戦表をクリアする前');
+  A.AppStorage.saveRounds([]);
+  await sleep(600);
+  assert.equal(B.AppStorage.getRounds().length, 0);
+
+  const snaps = await B.AppStorage.listSnapshots();
+  assert.equal(snaps[0].label, '対戦表をクリアする前');
+  B.AppStorage.restoreSnapshot(snaps[0]);
+  await sleep(800);
+  for (const [name, dev] of [['A', A], ['B', B]]) {
+    const r = dev.AppStorage.getRounds();
+    assert.equal(r.length, 1, `${name}：対戦表が復元される`);
+    assert.equal(r[0].matches[0].result, 'player1', `${name}：結果も復元される`);
+    assert.equal(dev.AppStorage.getPlayers().find(p => p.id === ps[1].id).withdrawn, true, `${name}：途中棄権の状態も復元される`);
+  }
+  const labels = (await A.AppStorage.listSnapshots()).map(sn => sn.label);
+  assert.ok(labels.includes('復元する前の状態'), '復元前の状態も保存される（復元自体も元に戻せる）');
 });

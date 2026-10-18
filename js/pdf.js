@@ -415,15 +415,21 @@ const PDF = {
             <th>不戦勝</th>
             <th>勝率</th>
             ${showPt ? '<th>Pt</th>' : ''}
+            <th>ソルコフ</th>
+            <th>順位</th>
+            <th>ソルコフ−敗数</th>
+            <th>順位</th>
           </tr>
         </thead>
         <tbody>`;
 
+    const rankCell = r => (r == null ? '—' : `${this._esc(r)}位`);
+    const valueCell = (v, r) => (r == null ? '—' : this._esc(v));
     standings.forEach(s => {
       html += `
           <tr>
             <td><strong>${this._esc(s.position)}</strong></td>
-            <td class="name-td"><strong>${this._esc(s.name)}</strong></td>
+            <td class="name-td"><strong>${this._esc(s.name)}</strong>${s.withdrawn ? '（棄権）' : ''}</td>
             <td>${this._esc(s.grade)}年</td>
             <td class="win-td">${this._esc(s.wins)}</td>
             <td class="loss-td">${this._esc(s.losses)}</td>
@@ -431,10 +437,25 @@ const PDF = {
             <td>${this._esc(s.byes)}</td>
             <td>${this._esc(s.winRate.toFixed(1))}%</td>
             ${showPt ? `<td class="pt-td">${this._esc(s.points)}</td>` : ''}
+            <td>${valueCell(s.solkoff, s.solkoffRank)}</td>
+            <td>${rankCell(s.solkoffRank)}</td>
+            <td>${valueCell(s.solkoffMinusLosses, s.solkoffMinusLossesRank)}</td>
+            <td>${rankCell(s.solkoffMinusLossesRank)}</td>
           </tr>`;
     });
 
-    html += `</tbody></table>`;
+    const sum = opts.indexSummary;
+    if (sum) {
+      const f = v => (v == null ? '—' : this._esc((Math.round(v * 10) / 10).toFixed(1)));
+      html += `
+          <tr>
+            <td colspan="${showPt ? 9 : 8}" style="text-align:right;">平均 ／ 標準偏差</td>
+            <td colspan="2">${f(sum.solkoff.mean)} ／ ${f(sum.solkoff.sd)}</td>
+            <td colspan="2">${f(sum.solkoffMinusLosses.mean)} ／ ${f(sum.solkoffMinusLosses.sd)}</td>
+          </tr>`;
+    }
+    html += `</tbody></table>
+      <p class="subtitle">ソルコフ＝結果が入力された対局の相手の Pt の合計（不戦勝の回戦は含めない）。ソルコフ−敗数＝ソルコフから自分の敗数を引いた値。順位は1局以上対局した選手での順位（同じ値は同順位）、標準偏差は母標準偏差。</p>`;
     return html;
   },
 

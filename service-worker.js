@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shogi-match-v15';
+const CACHE_NAME = 'shogi-match-v16';
 const ASSETS = [
   './',
   './index.html',
@@ -8,6 +8,8 @@ const ASSETS = [
   './js/matching.js',
   './js/ui.js',
   './js/pdf.js',
+  './js/league.js',
+  './manifest.json',
 ];
 
 self.addEventListener('install', (event) => {
