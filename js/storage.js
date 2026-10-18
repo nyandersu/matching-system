@@ -237,12 +237,13 @@ const AppStorage = {
   },
 
   /** 新しく作成した部屋を、ログイン中アカウントの所有部屋としてサーバーに登録 */
-  async registerOwnedRoom(roomId) {
+  async registerOwnedRoom(roomId, clubId = null) {
     if (!supabaseClient) throw new Error('Supabase未接続');
     const session = this.getSession();
     if (!session) throw new Error('ログインが必要です');
     const { error } = await supabaseClient.rpc('my_room_register', {
       p_room_id: roomId.toUpperCase().trim(),
+      p_club_id: clubId,
     });
     if (error) throw new Error('部屋の登録に失敗しました');
   },
@@ -259,7 +260,119 @@ const AppStorage = {
       createdAt:   r.created_at,
       playerCount: Number(r.player_count) || 0,
       roundCount:  Number(r.round_count) || 0,
+      clubId:      r.club_id || null,
+      clubName:    r.club_name || null,
     }));
+  },
+
+  // ============================================
+  // 部と名簿（部屋をまたいで選手・レーティング・履歴を保持）
+  // ============================================
+
+  async _rpc(name, args, message) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const { data, error } = await supabaseClient.rpc(name, args);
+    if (error) {
+      const msg = error.message || '';
+      if (msg.includes('club_not_found')) throw new Error('その部コードの部は見つかりません');
+      if (msg.includes('not_member'))     throw new Error('その部に参加していません');
+      if (msg.includes('not_owner'))      throw new Error('自分が作成した部屋のみ変更できます');
+      throw new Error(message);
+    }
+    return data;
+  },
+
+  async listClubs() {
+    const data = await this._rpc('my_clubs', {}, '部の一覧の取得に失敗しました');
+    return (data || []).map(c => ({
+      clubId: c.club_id, name: c.name, isOwner: !!c.is_owner,
+      playerCount: Number(c.player_count) || 0, roomCount: Number(c.room_count) || 0,
+    }));
+  },
+
+  async createClub(name) {
+    return this._rpc('club_create', { p_name: name }, '部の作成に失敗しました');
+  },
+
+  async joinClub(code) {
+    const data = await this._rpc('club_join', { p_club_id: code }, '部への参加に失敗しました');
+    return Array.isArray(data) ? data[0] : data;
+  },
+
+  /** 部屋を部にひも付ける（部屋の選手は同名の名簿の選手に、いなければ名簿に追加してひも付け） */
+  async linkRoomToClub(roomId, clubId) {
+    return this._rpc('room_set_club', { p_room_id: roomId, p_club_id: clubId }, '部へのひも付けに失敗しました');
+  },
+
+  async listRoster(clubId) {
+    if (!supabaseClient) return [];
+    const { data, error } = await supabaseClient.from('club_players')
+      .select('id, name, grade, rank, rating, retired')
+      .eq('club_id', clubId)
+      .order('retired').order('grade').order('name');
+    if (error) throw new Error('名簿の取得に失敗しました');
+    return (data || []).map(p => ({ ...p, rating: p.rating == null ? null : Number(p.rating) }));
+  },
+
+  /** 名簿の選手を追加・更新（id があれば更新） */
+  async saveRosterPlayer(clubId, player) {
+    if (!supabaseClient) throw new Error('Supabase未接続');
+    const row = {
+      id: player.id || this._uuid(), club_id: clubId,
+      name: player.name, grade: player.grade ?? null, rank: player.rank ?? null,
+      rating: player.rating ?? null, retired: !!player.retired, updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabaseClient.from('club_players').upsert(row);
+    if (error) throw new Error('名簿の保存に失敗しました');
+    return row;
+  },
+
+  async listRatingHistory(clubPlayerId) {
+    if (!supabaseClient) return [];
+    const { data, error } = await supabaseClient.from('rating_history')
+      .select('room_id, rounds, before, after, created_at')
+      .eq('club_player_id', clubPlayerId)
+      .order('created_at');
+    if (error) throw new Error('レーティング履歴の取得に失敗しました');
+    return data || [];
+  },
+
+  /** 開いている部屋の部（ひも付いていなければ null） */
+  getRoomClub() {
+    return this.loadAll().club || null;
+  },
+
+  /** 名簿の選手を部屋に追加する（名簿の値をコピーし、名簿にひも付ける） */
+  addPlayersFromRoster(rosterPlayers) {
+    const data = this.loadAll();
+    const existing = new Set(data.players.map(p => p.clubPlayerId).filter(Boolean));
+    const added = rosterPlayers.filter(rp => !existing.has(rp.id)).map(rp => ({
+      id: this.generateId(), name: rp.name, grade: rp.grade ?? 1, rank: rp.rank || 'C',
+      rating: rp.rating ?? null, clubPlayerId: rp.id,
+    }));
+    if (added.length === 0) return [];
+    data.players.push(...added);
+    this._saveLocal(data);
+    this._remote('名簿から追加', () => supabaseClient.from('players').upsert(added.map(p => this._playerRow(p))));
+    return added;
+  },
+
+  _uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  },
+
+  /** 名簿の選手を部屋の選手の値で更新（部屋の編集を名簿にも反映） */
+  _rosterRow(p) {
+    return {
+      id: p.clubPlayerId, name: p.name, grade: p.grade ?? null, rank: p.rank ?? null,
+      rating: p.rating ?? null, updated_at: new Date().toISOString(),
+    };
   },
 
   /** 部屋をセットし、最近の部屋リストに追加 */
@@ -385,6 +498,7 @@ const AppStorage = {
       id: p.id, name: p.name, grade: p.grade, rank: p.rank,
       rating: p.rating ?? null,
       withdrawn: !!p.withdrawn,
+      club_player_id: p.clubPlayerId || null,
       room_id: this.roomId,
     };
   },
@@ -427,14 +541,15 @@ const AppStorage = {
       await this._writeQueue;               // 自分の未送信の書き込みを先に反映させる
       const versionAtStart = this._localVersion;
 
-      let sQuery, pQuery, rQuery, lQuery, authQuery;
+      let sQuery, pQuery, rQuery, lQuery, authQuery, infoQuery;
       try {
-        [authQuery, sQuery, pQuery, rQuery, lQuery] = await Promise.all([
+        [authQuery, sQuery, pQuery, rQuery, lQuery, infoQuery] = await Promise.all([
           supabaseClient.rpc('auth_session'),
           supabaseClient.from('settings').select('*').eq('id', this.roomId).maybeSingle(),
           supabaseClient.from('players').select('*').eq('room_id', this.roomId),
           supabaseClient.from('rounds').select('*').eq('room_id', this.roomId).order('round_number'),
           supabaseClient.from('leagues').select('data').eq('room_id', this.roomId).maybeSingle(),
+          supabaseClient.rpc('room_info'),
         ]);
       } catch (e) {
         console.warn('Supabaseからのデータ取得に失敗しました(オフラインの可能性があります):', e);
@@ -463,13 +578,29 @@ const AppStorage = {
         this._remote('設定', () => supabaseClient.from('settings').upsert(this._settingsRow(data.settings)));
       }
 
+      // 部屋の部（部にひも付いていれば、名簿の選手の名前・学年・ランク・レーティングを正とする）
+      if (infoQuery && !infoQuery.error) {
+        const info = Array.isArray(infoQuery.data) ? infoQuery.data[0] : infoQuery.data;
+        data.club = info && info.club_id ? { clubId: info.club_id, name: info.club_name } : null;
+      }
       const remotePlayers = pQuery.data || [];
+      let roster = {};
+      const linkedIds = remotePlayers.map(p => p.club_player_id).filter(Boolean);
+      if (data.club && linkedIds.length > 0) {
+        const rq = await supabaseClient.from('club_players').select('id, name, grade, rank, rating').in('id', linkedIds);
+        if (!rq.error) roster = Object.fromEntries((rq.data || []).map(cp => [cp.id, cp]));
+      }
       if (remotePlayers.length > 0 || !initial) {
-        data.players = remotePlayers.map(p => ({
-          id: p.id, name: p.name, grade: p.grade, rank: p.rank,
-          rating: p.rating == null ? null : Number(p.rating),
-          withdrawn: !!p.withdrawn,
-        }));
+        data.players = remotePlayers.map(p => {
+          const cp = roster[p.club_player_id];
+          const src = cp ? { ...p, name: cp.name, grade: cp.grade ?? p.grade, rank: cp.rank ?? p.rank, rating: cp.rating } : p;
+          return {
+            id: p.id, name: src.name, grade: src.grade, rank: src.rank,
+            rating: src.rating == null ? null : Number(src.rating),
+            withdrawn: !!p.withdrawn,
+            clubPlayerId: p.club_player_id || null,
+          };
+        });
       } else if (data.players.length > 0) {
         this._remote('選手', () => supabaseClient.from('players').upsert(data.players.map(p => this._playerRow(p))));
       }
@@ -603,9 +734,18 @@ const AppStorage = {
   addPlayer(player) {
     const data = this.loadAll();
     player.id = this.generateId();
+    // 部にひも付いた部屋では、名簿にも追加してひも付ける
+    const club = data.club;
+    if (club && !player.clubPlayerId) player.clubPlayerId = this._uuid();
     data.players.push(player);
     this._saveLocal(data);
-    this._remote('選手の追加', () => supabaseClient.from('players').upsert(this._playerRow(player)));
+    this._remote('選手の追加', async () => {
+      if (club) {
+        const res = await supabaseClient.from('club_players').upsert({ ...this._rosterRow(player), club_id: club.clubId });
+        if (res.error) return res;
+      }
+      return supabaseClient.from('players').upsert(this._playerRow(player));
+    });
     return player;
   },
 
@@ -616,7 +756,15 @@ const AppStorage = {
     data.players[idx] = { ...data.players[idx], ...updates };
     const player = data.players[idx];
     this._saveLocal(data);
-    this._remote('選手の更新', () => supabaseClient.from('players').upsert(this._playerRow(player)));
+    // 名前・学年・ランク・レーティングの変更は名簿にも反映（途中棄権は部屋ごとの状態なので反映しない）
+    const touchesRoster = player.clubPlayerId && ['name', 'grade', 'rank', 'rating'].some(k => k in updates);
+    this._remote('選手の更新', async () => {
+      if (touchesRoster) {
+        const res = await supabaseClient.from('club_players').update(this._rosterRow(player)).eq('id', player.clubPlayerId);
+        if (res.error) return res;
+      }
+      return supabaseClient.from('players').upsert(this._playerRow(player));
+    });
     return player;
   },
 

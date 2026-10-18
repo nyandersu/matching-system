@@ -114,6 +114,10 @@
     <p class="room-selector-subtitle">部屋コードで参加者とデータを共有できます</p>
 
     <div class="room-selector-actions">
+      <div class="room-club-select-group hidden" id="room-club-select-group">
+        <label for="room-club-select" class="form-label">新しい部屋の部（名簿を使う）</label>
+        <select id="room-club-select" class="form-select"></select>
+      </div>
       <button id="room-create-btn" class="btn btn-primary room-btn">
         ＋ 新しい部屋を作成
       </button>
@@ -133,6 +137,16 @@
         <button id="room-join-btn" class="btn btn-secondary room-btn">
           参加
         </button>
+      </div>
+    </div>
+
+    <div id="club-section" class="room-history">
+      <p class="room-history-label">部（部屋をまたいで使う名簿）</p>
+      <div id="club-list" class="room-history-list"></div>
+      <div class="club-actions">
+        <button id="club-create-btn" class="btn btn-ghost btn-sm">＋ 部を作成</button>
+        <input type="text" id="club-code-input" class="form-input club-code-input" placeholder="部コードで参加" maxlength="7" autocapitalize="characters" spellcheck="false">
+        <button id="club-join-btn" class="btn btn-secondary btn-sm">参加</button>
       </div>
     </div>
 
@@ -158,6 +172,7 @@
       <div id="room-info-bar" class="room-info-bar hidden">
         <span class="room-info-label">部屋:</span>
         <span id="room-code-display" class="room-code-display"></span>
+        <span id="room-club-display" class="room-club-display hidden"></span>
         <button id="change-room-btn" class="btn-change-room" title="部屋を変更">変更</button>
         <button id="history-btn" class="btn-change-room" title="以前の状態に戻す">↩ 元に戻す</button>
       </div>
@@ -254,6 +269,7 @@
         <span>📋</span> 登録選手一覧
         <span class="player-count-badge" id="player-count">0人</span>
       </h2>
+      <button class="btn btn-secondary hidden" id="add-from-roster-btn" style="font-size:13px;">📋 名簿から追加</button>
       <button class="btn btn-danger" id="reset-all-btn" style="font-size:13px;">
         全データリセット
       </button>
@@ -488,6 +504,65 @@
     <div class="btn-group">
       <button class="btn btn-primary" id="rating-update-apply">反映する</button>
       <button class="btn btn-secondary" id="rating-update-cancel">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- 部の名簿 -->
+<div id="roster-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card roster-card">
+    <button class="modal-close" id="roster-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title" id="roster-title">名簿</h3>
+    <p class="pt-info-note" id="roster-note"></p>
+    <form id="roster-form" class="roster-form" autocomplete="off">
+      <input type="hidden" id="roster-edit-id">
+      <input type="text" id="roster-name" class="form-input" placeholder="名前" maxlength="20" required>
+      <select id="roster-grade" class="form-select">
+        <option value="1">1年</option><option value="2">2年</option><option value="3">3年</option><option value="4">4年</option>
+        <option value="5">5年</option><option value="6">6年</option><option value="7">7年</option><option value="8">8年</option>
+      </select>
+      <select id="roster-rank" class="form-select">
+        <option value="S">S</option><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option>
+      </select>
+      <input type="number" id="roster-rating" class="form-input" placeholder="レーティング" step="any" min="-99999" max="99999" inputmode="decimal">
+      <button type="submit" class="btn btn-primary btn-sm" id="roster-submit">追加</button>
+      <button type="button" class="btn btn-secondary btn-sm hidden" id="roster-cancel">キャンセル</button>
+    </form>
+    <div class="roster-tools">
+      <label class="roster-check"><input type="checkbox" id="roster-show-retired"> 引退した選手も表示</label>
+      <button type="button" class="btn btn-ghost btn-sm" id="roster-promote-btn">全員の学年を1つ上げる</button>
+    </div>
+    <div class="opp-strength-table-wrapper">
+      <table class="opp-strength-table roster-table" id="roster-table"></table>
+    </div>
+  </div>
+</div>
+
+<!-- 名簿から部屋に追加 -->
+<div id="roster-pick-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card">
+    <button class="modal-close" id="roster-pick-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">名簿から追加</h3>
+    <p class="pt-info-note">この部屋に入っていない名簿の選手です（引退した選手は除く）。</p>
+    <label class="roster-check"><input type="checkbox" id="roster-pick-all"> すべて選択</label>
+    <div id="roster-pick-list" class="history-list"></div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="roster-pick-apply">追加する</button>
+      <button class="btn btn-secondary" id="roster-pick-cancel">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- 部屋を部にひも付ける -->
+<div id="club-link-modal" class="modal-overlay hidden">
+  <div class="modal-card history-card">
+    <button class="modal-close" id="club-link-close" aria-label="閉じる">✕</button>
+    <h3 class="pt-info-title">部にひも付ける</h3>
+    <p class="pt-info-note" id="club-link-note"></p>
+    <select id="club-link-select" class="form-select"></select>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="club-link-apply">ひも付ける</button>
+      <button class="btn btn-secondary" id="club-link-cancel">キャンセル</button>
     </div>
   </div>
 </div>

@@ -8,11 +8,12 @@ const path = require('path');
 const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'storage.js'), 'utf8');
 
 // ---- 疑似DB（サーバー側の挙動を再現） ----
-const db = { players: [], rounds: [], settings: [], leagues: [], room_snapshots: [] };
+const db = { players: [], rounds: [], settings: [], leagues: [], room_snapshots: [], club_players: [] };
+let roomClub = null;   // room_info が返す部（null なら部なし）
 let snapshotSeq = 0;
 const listeners = [];
 const clone = x => JSON.parse(JSON.stringify(x));
-const pk = { players: r => r.id, rounds: r => r.room_id + '#' + r.round_number, settings: r => r.id, leagues: r => r.room_id, room_snapshots: r => r.id };
+const pk = { players: r => r.id, rounds: r => r.room_id + '#' + r.round_number, settings: r => r.id, leagues: r => r.room_id, room_snapshots: r => r.id, club_players: r => r.id };
 
 function query(table) {
   const filters = [];
@@ -28,6 +29,8 @@ function query(table) {
     },
     order(c, opts) { q._order = c; q._desc = opts && opts.ascending === false; return q; },
     limit() { return q; },
+    in(c, list) { filters.push(r => list.includes(r[c])); return q; },
+    update(row) { q._op = 'update'; q._rows = [row]; return q; },
     insert(rows) {
       q._op = 'upsert';
       q._rows = [].concat(rows).map(r => ({ ...r, id: ++snapshotSeq, created_at: new Date(Date.now() + snapshotSeq).toISOString() }));
@@ -47,6 +50,10 @@ function query(table) {
           return { error: null };
         }
         if (q._op === 'delete') { db[table] = db[table].filter(r => !match(r)); return { error: null }; }
+        if (q._op === 'update') {
+          db[table].filter(match).forEach(r => Object.assign(r, clone(q._rows[0])));
+          return { error: null };
+        }
         let rows = clone(db[table].filter(match));
         if (q._order) rows.sort((a, b) => (a[q._order] > b[q._order] ? 1 : a[q._order] < b[q._order] ? -1 : 0) * (q._desc ? -1 : 1));
         return { data: q._single ? (rows[0] || null) : rows, error: null };
@@ -62,6 +69,7 @@ function makeClient() {
     rpc(name, args) {
       return new Promise(r => setTimeout(r, Math.random() * 5)).then(() => {
         if (name === 'auth_session') return { data: [{ account_id: 'a' }], error: null };
+        if (name === 'room_info') return { data: roomClub ? [{ room_id: 'TEST01', club_id: roomClub.id, club_name: roomClub.name }] : [], error: null };
         if (name === 'round_set_result') {
           const r = db.rounds.find(x => x.round_number === args.p_round);
           if (r.confirmed) return { error: { message: 'round_confirmed' } };
@@ -190,4 +198,45 @@ test('途中棄権が他の端末に反映され、元に戻すで全端末が�
   }
   const labels = (await A.AppStorage.listSnapshots()).map(sn => sn.label);
   assert.ok(labels.includes('復元する前の状態'), '復元前の状態も保存される（復元自体も元に戻せる）');
+});
+
+test('部の名簿：部屋で追加・編集した選手は名簿にも入り、名簿の変更は部屋に反映される', async () => {
+  db.players = []; db.rounds = []; db.club_players = [];
+  roomClub = { id: 'BCLUB01', name: 'テスト将棋部' };
+  const A = makeDevice('A');
+  await sleep(100);
+  assert.deepEqual(A.AppStorage.getRoomClub(), { clubId: 'BCLUB01', name: 'テスト将棋部' });
+
+  // 部屋で追加 → 名簿にも追加されひも付く
+  const p = A.AppStorage.addPlayer({ name: '山田', grade: 1, rank: 'S', rating: 1800 });
+  await sleep(100);
+  assert.equal(db.club_players.length, 1);
+  assert.equal(db.club_players[0].club_id, 'BCLUB01');
+  assert.equal(db.players[0].club_player_id, db.club_players[0].id);
+
+  // 部屋で編集 → 名簿にも反映
+  A.AppStorage.updatePlayer(p.id, { name: '山田太郎', rating: 1820 });
+  await sleep(100);
+  assert.equal(db.club_players[0].name, '山田太郎');
+  assert.equal(db.club_players[0].rating, 1820);
+
+  // 途中棄権は部屋ごとの状態なので名簿は変わらない
+  A.AppStorage.updatePlayer(p.id, { withdrawn: true });
+  await sleep(100);
+  assert.equal(db.club_players[0].withdrawn, undefined);
+
+  // 別の部屋で名簿のレーティングが変わった → この部屋を開き直すと名簿の値になる
+  db.club_players[0].rating = 1900;
+  const B = makeDevice('B');
+  await sleep(150);
+  assert.equal(B.AppStorage.getPlayers()[0].rating, 1900, '名簿の値が部屋に反映される');
+
+  // 名簿から追加：すでに部屋にいる選手は重複しない
+  const added = B.AppStorage.addPlayersFromRoster([
+    { id: db.club_players[0].id, name: '山田太郎', grade: 1, rank: 'S', rating: 1900 },
+    { id: 'cp-2', name: '佐藤', grade: 2, rank: null, rating: null },
+  ]);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].rank, 'C', 'ランク未設定の名簿の選手は C として追加');
+  roomClub = null;
 });
