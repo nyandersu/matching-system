@@ -2,3 +2,5 @@
 tests/
 supabase/
 .github/
+CLAUDE.md
+.claude/
